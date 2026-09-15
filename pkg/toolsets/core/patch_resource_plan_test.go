@@ -48,7 +48,7 @@ func TestUpdateKubernetesResourcePlan(t *testing.T) {
 					},
 				},
 			},
-			expectedResult: `[{
+			expectedResult: `{"plan": [{
 				"type": "update",
 				"payload": {
 					"original": {"apiVersion":"v1","data":{"key1":"value1","key2":"value2"},"kind":"ConfigMap","metadata":{"name":"test-config","namespace":"default"}},
@@ -61,7 +61,7 @@ func TestUpdateKubernetesResourcePlan(t *testing.T) {
 					"cluster": "local",
 					"namespace": "default"
 				}
-			}]`,
+			}]}`,
 		},
 		"update configmap plan - replace existing key": {
 			params: updateKubernetesResourceParams{
@@ -77,7 +77,7 @@ func TestUpdateKubernetesResourcePlan(t *testing.T) {
 					},
 				},
 			},
-			expectedResult: `[{
+			expectedResult: `{"plan": [{
 				"type": "update",
 				"payload": {
 					"original": {"apiVersion":"v1","data":{"key1":"value1","key2":"value2"},"kind":"ConfigMap","metadata":{"name":"test-config","namespace":"default"}},
@@ -90,7 +90,7 @@ func TestUpdateKubernetesResourcePlan(t *testing.T) {
 					"cluster": "local",
 					"namespace": "default"
 				}
-			}]`,
+			}]}`,
 		},
 		"update configmap plan - remove key": {
 			params: updateKubernetesResourceParams{
@@ -105,7 +105,7 @@ func TestUpdateKubernetesResourcePlan(t *testing.T) {
 					},
 				},
 			},
-			expectedResult: `[{
+			expectedResult: `{"plan": [{
 				"type": "update",
 				"payload": {
 					"original": {"apiVersion":"v1","data":{"key1":"value1","key2":"value2"},"kind":"ConfigMap","metadata":{"name":"test-config","namespace":"default"}},
@@ -118,7 +118,7 @@ func TestUpdateKubernetesResourcePlan(t *testing.T) {
 					"cluster": "local",
 					"namespace": "default"
 				}
-			}]`,
+			}]}`,
 		},
 		"update plan - multiple patches": {
 			params: updateKubernetesResourceParams{
@@ -139,7 +139,7 @@ func TestUpdateKubernetesResourcePlan(t *testing.T) {
 					},
 				},
 			},
-			expectedResult: `[{
+			expectedResult: `{"plan": [{
 				"type": "update",
 				"payload": {
 					"original": {"apiVersion":"apps/v1","kind":"Deployment","metadata":{"labels":{"existing":"label"},"name":"my-deploy","namespace":"staging"},"spec":{"replicas":1,"selector":{"matchLabels":{"app":"myapp"}},"strategy":{},"template":{"metadata":{},"spec":{"containers":null}}},"status":{}},
@@ -155,7 +155,7 @@ func TestUpdateKubernetesResourcePlan(t *testing.T) {
 					"cluster": "local",
 					"namespace": "staging"
 				}
-			}]`,
+			}]}`,
 		},
 		"update plan - cluster-scoped resource": {
 			params: updateKubernetesResourceParams{
@@ -171,7 +171,7 @@ func TestUpdateKubernetesResourcePlan(t *testing.T) {
 					},
 				},
 			},
-			expectedResult: `[{
+			expectedResult: `{"plan": [{
 				"type": "update",
 				"payload": {
 					"original": {"apiVersion":"v1","kind":"Namespace","metadata":{"labels":{"existing":"label"},"name":"my-ns"},"spec":{},"status":{}},
@@ -184,7 +184,7 @@ func TestUpdateKubernetesResourcePlan(t *testing.T) {
 					"cluster": "local",
 					"namespace": ""
 				}
-			}]`,
+			}]}`,
 		},
 	}
 

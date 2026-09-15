@@ -26,6 +26,7 @@ import (
 // tool sees them; the tool skips them again defensively).
 var listAPIResourcesDiscovery = []*metav1.APIResourceList{
 	{GroupVersion: "v1", APIResources: []metav1.APIResource{
+		{Name: "configmaps", Kind: "ConfigMap", Namespaced: true},
 		{Name: "pods", Kind: "Pod", Namespaced: true},
 		{Name: "pods/status", Kind: "Pod", Namespaced: true},
 	}},
@@ -61,10 +62,11 @@ func TestListAPIResourcesSkipsSubresources(t *testing.T) {
 		LLM []map[string]any `json:"llm"`
 	}
 	require.NoError(t, json.Unmarshal([]byte(res.Content[0].(*mcp.TextContent).Text), &payload))
-	require.Len(t, payload.LLM, 3)
-	assert.Equal(t, "pods", payload.LLM[0]["resource"])
-	assert.Equal(t, "virtualmachines", payload.LLM[1]["resource"])
+	require.Len(t, payload.LLM, 4)
+	assert.Equal(t, "configmaps", payload.LLM[0]["resource"])
+	assert.Equal(t, "pods", payload.LLM[1]["resource"])
 	assert.Equal(t, "virtualmachines", payload.LLM[2]["resource"])
+	assert.Equal(t, "virtualmachines", payload.LLM[3]["resource"])
 }
 
 // fakeDiscoveryClientset returns a ClientSetCreator serving the given discovery
@@ -102,6 +104,7 @@ func TestListAPIResources(t *testing.T) {
 		"all resources sorted by group, kind, version": {
 			params: listAPIResourcesParams{Cluster: "local"},
 			expected: []map[string]any{
+				{"group": "", "version": "v1", "kind": "ConfigMap", "resource": "configmaps", "namespaced": true},
 				{"group": "", "version": "v1", "kind": "Pod", "resource": "pods", "namespaced": true},
 				{"group": "harvesterhci.io", "version": "v1beta1", "kind": "VirtualMachine", "resource": "virtualmachines", "namespaced": true},
 				{"group": "kubevirt.io", "version": "v1", "kind": "VirtualMachine", "resource": "virtualmachines", "namespaced": true},
@@ -204,8 +207,8 @@ func TestDiscoveryHelperHonorsFakeResources(t *testing.T) {
 	// Subresources (pods/status, virtualmachines/status) are dropped by the helper.
 	pods, ok := byGroupVersion["v1"]
 	require.True(t, ok, "v1 must be served")
-	require.Len(t, pods.APIResources, 1)
-	assert.Equal(t, "pods", pods.APIResources[0].Name)
+	require.Len(t, pods.APIResources, 2)
+	assert.ElementsMatch(t, []string{"configmaps", "pods"}, []string{pods.APIResources[0].Name, pods.APIResources[1].Name})
 
 	harvester, ok := byGroupVersion["harvesterhci.io/v1beta1"]
 	require.True(t, ok, "harvesterhci.io/v1beta1 must be served")

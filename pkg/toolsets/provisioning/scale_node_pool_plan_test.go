@@ -45,7 +45,7 @@ func TestScaleNodePoolPlan(t *testing.T) {
 				DesiredSize:  3,
 			},
 			expectedError: "",
-			expectedResult: `[
+			expectedResult: `{"plan": [
   {
     "type": "update",
     "payload": [
@@ -62,7 +62,7 @@ func TestScaleNodePoolPlan(t *testing.T) {
       "namespace": "fleet-default"
     }
   }
-]`,
+]}`,
 		},
 		{
 			name:          "refuse to scale etcd node pool below 3 nodes",
@@ -120,7 +120,7 @@ func TestScaleNodePoolPlan(t *testing.T) {
 				DesiredSize:  1,
 			},
 			expectedError: "",
-			expectedResult: `[
+			expectedResult: `{"plan": [
   {
     "type": "update",
     "payload": [
@@ -137,7 +137,7 @@ func TestScaleNodePoolPlan(t *testing.T) {
       "namespace": "fleet-default"
     }
   }
-]`,
+]}`,
 		},
 		{
 			name:          "fail to provide desired size or amount to add/subtract",
@@ -209,7 +209,7 @@ func TestScaleNodePoolPlan(t *testing.T) {
 				AmountToAdd:      1,
 			},
 			expectedError: "",
-			expectedResult: `[
+			expectedResult: `{"plan": [
   {
     "type": "update",
     "payload": [
@@ -226,7 +226,7 @@ func TestScaleNodePoolPlan(t *testing.T) {
       "namespace": "fleet-default"
     }
   }
-]`,
+]}`,
 		},
 		{
 			name:          "try to scale an etcd pool to an even number of nodes",
@@ -296,7 +296,7 @@ func TestScaleNodePoolPlan(t *testing.T) {
 				AmountToAdd:      2,
 			},
 			expectedError: "",
-			expectedResult: `[
+			expectedResult: `{"plan": [
   {
     "type": "update",
     "payload": [
@@ -313,7 +313,7 @@ func TestScaleNodePoolPlan(t *testing.T) {
       "namespace": "fleet-default"
     }
   }
-]`,
+]}`,
 		},
 		{
 			name:          "subtract a single node",
@@ -337,7 +337,7 @@ func TestScaleNodePoolPlan(t *testing.T) {
 				AmountToAdd:      0,
 			},
 			expectedError: "",
-			expectedResult: `[
+			expectedResult: `{"plan": [
   {
     "type": "update",
     "payload": [
@@ -354,7 +354,7 @@ func TestScaleNodePoolPlan(t *testing.T) {
       "namespace": "fleet-default"
     }
   }
-]`,
+]}`,
 		},
 		{
 			name:          "refuse to subtract a node if it would scale pool to zero nodes",

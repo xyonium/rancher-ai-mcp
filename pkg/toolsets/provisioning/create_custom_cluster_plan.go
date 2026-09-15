@@ -27,7 +27,7 @@ func (t *Tools) createCustomClusterPlan(_ context.Context, toolReq *mcp.CallTool
 	}
 
 	createResource := response.NewCreateResourceInput(unstructuredObj, LocalCluster)
-	mcpResponse, err := response.CreatePlanResponse([]response.PlanResource{createResource})
+	mcpResponse, err := response.CreatePlanResponse([]response.PlanResource{createResource}, nil)
 	if err != nil {
 		zap.L().Error("failed to create plan response", zap.Error(err))
 		return nil, nil, err

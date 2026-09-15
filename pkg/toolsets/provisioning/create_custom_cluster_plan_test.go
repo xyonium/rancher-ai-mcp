@@ -215,7 +215,7 @@ func TestCreateCustomClusterPlan(t *testing.T) {
 }
 
 func createCustomClusterPlanOutput(params createCustomClusterParams, finalK8sVersion string) string {
-	return fmt.Sprintf(`[
+	return fmt.Sprintf(`{"plan": [
   {
     "type": "create",
     "payload": {
@@ -279,5 +279,5 @@ func createCustomClusterPlanOutput(params createCustomClusterParams, finalK8sVer
       "namespace": "fleet-default"
     }
   }
-]`, params.Description, params.Name, finalK8sVersion, params.CNI, params.Name)
+]}`, params.Description, params.Name, finalK8sVersion, params.CNI, params.Name)
 }

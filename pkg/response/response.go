@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"strings"
+	"time"
 
 	"github.com/rancher/rancher-ai-mcp/pkg/converter"
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
@@ -180,13 +181,24 @@ func NewUpdateResourceInput(obj *unstructured.Unstructured, patch []byte, cluste
 	return plan_resource
 }
 
-// CreatePlanResponse serializes a slice of PlanResource into a JSON string.
-// It returns the JSON representation and any marshalling error encountered.
-func CreatePlanResponse(resources []PlanResource) (string, error) {
-	bytes, err := json.Marshal(resources)
+// Confirmation carries the single-use token a Write tool requires, minted by
+// the matching Plan tool.
+type Confirmation struct {
+	Token     string    `json:"confirmationToken"`
+	ExpiresAt time.Time `json:"expiresAt"`
+	Note      string    `json:"note"`
+}
+
+// CreatePlanResponse serializes the planned operations, optionally with a
+// confirmation token block.
+func CreatePlanResponse(resources []PlanResource, confirmation *Confirmation) (string, error) {
+	out := map[string]any{"plan": resources}
+	if confirmation != nil {
+		out["confirmation"] = confirmation
+	}
+	bytes, err := json.Marshal(out)
 	if err != nil {
 		return "", fmt.Errorf("failed to marshal plan response: %w", err)
 	}
-
 	return string(bytes), nil
 }

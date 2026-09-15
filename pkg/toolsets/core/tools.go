@@ -15,6 +15,7 @@ import (
 	"k8s.io/apimachinery/pkg/runtime/schema"
 	"k8s.io/client-go/dynamic"
 	"k8s.io/client-go/kubernetes"
+	"k8s.io/utils/ptr"
 )
 
 const (
@@ -162,7 +163,10 @@ Supports any resource kind including custom resources. If the kind is unknown to
 			Meta: map[string]any{
 				toolsSetAnn: toolsSet,
 			},
-			Description: `Creates a resource in a Kubernetes cluster from a complete Kubernetes manifest passed in the 'manifest' field, in YAML or JSON. The namespace must be empty for cluster-wide resources.
+			Annotations: &mcp.ToolAnnotations{ReadOnlyHint: false, IdempotentHint: false, OpenWorldHint: ptr.To(false)},
+			Description: `SECURITY: This tool CREATES a resource in the cluster and changes its state. Protocol, no exceptions: (1) Call createKubernetesResourcePlan first and show the user the complete manifest. (2) Obtain the user's EXPLICIT approval for THIS EXACT creation. (3) Call this tool with the confirmationToken from the plan response. The server then asks the USER DIRECTLY to confirm — you cannot and MUST NOT answer on their behalf. Approval never carries over to any other operation; never create resources proactively.
+
+Creates a resource in a Kubernetes cluster from a complete Kubernetes manifest passed in the 'manifest' field, in YAML or JSON. Any resource kind is supported, including custom resources: the target API is resolved from the manifest's own apiVersion and kind via cluster API discovery. The namespace must be empty for cluster-wide resources.
 
 Example of the manifest parameter (YAML):
 apiVersion: v1
@@ -179,7 +183,10 @@ data:
 			Meta: map[string]any{
 				toolsSetAnn: toolsSet,
 			},
-			Description: `Plans to create a resource in a Kubernetes cluster from a complete Kubernetes manifest passed in the 'manifest' field, in YAML or JSON. It returns the JSON representation of the resource to be created without actually creating it in the cluster. Only used for displaying the resource when using human validation. The namespace must be empty for cluster-wide resources.`},
+			Annotations: &mcp.ToolAnnotations{ReadOnlyHint: false, IdempotentHint: false, OpenWorldHint: ptr.To(false)},
+			Description: `SECURITY: This tool only PLANS a creation; it changes nothing. It returns the planned operation plus a single-use confirmationToken. Show the plan to the user; only after their explicit approval may createKubernetesResource be called with this confirmationToken.
+
+Plans to create a resource in a Kubernetes cluster from a complete Kubernetes manifest passed in the 'manifest' field, in YAML or JSON. Any resource kind is supported, including custom resources: the target API is resolved from the manifest's own apiVersion and kind via cluster API discovery. The namespace must be empty for cluster-wide resources.`},
 			t.createKubernetesResourcePlan)
 
 		mcp.AddTool(mcpServer, &mcp.Tool{

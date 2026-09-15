@@ -21,7 +21,7 @@ func (t *Tools) createProjectPlan(_ context.Context, _ *mcp.CallToolRequest, par
 	}
 
 	createResource := response.NewCreateResourceInput(project, params.Cluster)
-	mcpResponse, err := response.CreatePlanResponse([]response.PlanResource{createResource})
+	mcpResponse, err := response.CreatePlanResponse([]response.PlanResource{createResource}, nil)
 	if err != nil {
 		zap.L().Error("failed to create plan response", zap.String("tool", "createProject_plan"), zap.Error(err))
 		return nil, nil, err

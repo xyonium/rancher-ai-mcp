@@ -30,12 +30,14 @@ func TestCreateProjectPlan(t *testing.T) {
 				Description: "A test project",
 			},
 			validateResult: func(t *testing.T, result string) {
-				var planResources []response.PlanResource
-				err := json.Unmarshal([]byte(result), &planResources)
+				var parsed struct {
+					Plan []response.PlanResource `json:"plan"`
+				}
+				err := json.Unmarshal([]byte(result), &parsed)
 				require.NoError(t, err)
-				require.Len(t, planResources, 1)
+				require.Len(t, parsed.Plan, 1)
 
-				planResource := planResources[0]
+				planResource := parsed.Plan[0]
 				assert.Equal(t, response.OperationCreate, planResource.Type)
 				assert.Equal(t, "test-project", planResource.Resource.Name)
 				assert.Equal(t, "Project", planResource.Resource.Kind)
@@ -71,12 +73,14 @@ func TestCreateProjectPlan(t *testing.T) {
 				MemoryReservation: 2048,
 			},
 			validateResult: func(t *testing.T, result string) {
-				var planResources []response.PlanResource
-				err := json.Unmarshal([]byte(result), &planResources)
+				var parsed struct {
+					Plan []response.PlanResource `json:"plan"`
+				}
+				err := json.Unmarshal([]byte(result), &parsed)
 				require.NoError(t, err)
-				require.Len(t, planResources, 1)
+				require.Len(t, parsed.Plan, 1)
 
-				planResource := planResources[0]
+				planResource := parsed.Plan[0]
 				payload, ok := planResource.Payload.(map[string]any)
 				require.True(t, ok)
 
@@ -97,12 +101,14 @@ func TestCreateProjectPlan(t *testing.T) {
 				Name:    "minimal-project",
 			},
 			validateResult: func(t *testing.T, result string) {
-				var planResources []response.PlanResource
-				err := json.Unmarshal([]byte(result), &planResources)
+				var parsed struct {
+					Plan []response.PlanResource `json:"plan"`
+				}
+				err := json.Unmarshal([]byte(result), &parsed)
 				require.NoError(t, err)
-				require.Len(t, planResources, 1)
+				require.Len(t, parsed.Plan, 1)
 
-				planResource := planResources[0]
+				planResource := parsed.Plan[0]
 				assert.Equal(t, response.OperationCreate, planResource.Type)
 				assert.Equal(t, "minimal-project", planResource.Resource.Name)
 

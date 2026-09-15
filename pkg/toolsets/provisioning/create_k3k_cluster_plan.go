@@ -32,7 +32,7 @@ func (t *Tools) createK3kClusterPlan(_ context.Context, toolReq *mcp.CallToolReq
 	obj := t.createK3kClusterObj(params)
 
 	createResource := response.NewCreateResourceInput(obj, params.TargetCluster)
-	mcpResponse, err := response.CreatePlanResponse([]response.PlanResource{createResource})
+	mcpResponse, err := response.CreatePlanResponse([]response.PlanResource{createResource}, nil)
 	if err != nil {
 		log.Error("failed to create plan response", zap.Error(err))
 		return nil, nil, err

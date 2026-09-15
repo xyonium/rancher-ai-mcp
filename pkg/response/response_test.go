@@ -1,7 +1,9 @@
 package response
 
 import (
+	"encoding/json"
 	"testing"
+	"time"
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -292,7 +294,7 @@ func TestCreatePlanResponse(t *testing.T) {
 					},
 				},
 			},
-			expected: `[{"type":"create","payload":{"apiVersion":"v1","kind":"Pod"},"resource":{"name":"my-pod","kind":"Pod","cluster":"local","namespace":"default"}}]`,
+			expected: `{"plan":[{"type":"create","payload":{"apiVersion":"v1","kind":"Pod"},"resource":{"name":"my-pod","kind":"Pod","cluster":"local","namespace":"default"}}]}`,
 		},
 		"mixed operations": {
 			resources: []PlanResource{
@@ -327,21 +329,21 @@ func TestCreatePlanResponse(t *testing.T) {
 					Payload: nil,
 				},
 			},
-			expected: `[{"type":"create","payload":{"kind":"Deployment"},"resource":{"name":"new-deploy","kind":"Deployment","cluster":"local","namespace":"default"}},{"type":"update","payload":[{"op":"replace","path":"/spec/type","value":"LoadBalancer"}],"resource":{"name":"existing-svc","kind":"Service","cluster":"local","namespace":"default"}},{"type":"delete","payload":null,"resource":{"name":"old-pod","kind":"Pod","cluster":"local","namespace":"kube-system"}}]`,
+			expected: `{"plan":[{"type":"create","payload":{"kind":"Deployment"},"resource":{"name":"new-deploy","kind":"Deployment","cluster":"local","namespace":"default"}},{"type":"update","payload":[{"op":"replace","path":"/spec/type","value":"LoadBalancer"}],"resource":{"name":"existing-svc","kind":"Service","cluster":"local","namespace":"default"}},{"type":"delete","payload":null,"resource":{"name":"old-pod","kind":"Pod","cluster":"local","namespace":"kube-system"}}]}`,
 		},
 		"empty resources": {
 			resources: []PlanResource{},
-			expected:  `[]`,
+			expected:  `{"plan":[]}`,
 		},
 		"nil resources": {
 			resources: nil,
-			expected:  `null`,
+			expected:  `{"plan":null}`,
 		},
 	}
 
 	for name, tc := range tests {
 		t.Run(name, func(t *testing.T) {
-			got, err := CreatePlanResponse(tc.resources)
+			got, err := CreatePlanResponse(tc.resources, nil)
 			if tc.expectError {
 				assert.Error(t, err)
 				return
@@ -350,6 +352,27 @@ func TestCreatePlanResponse(t *testing.T) {
 			assert.JSONEq(t, tc.expected, got)
 		})
 	}
+}
+
+func TestCreatePlanResponseWithConfirmation(t *testing.T) {
+	res, err := CreatePlanResponse([]PlanResource{{Type: OperationCreate, Resource: Resource{Name: "x", Kind: "ConfigMap", Cluster: "local"}, Payload: map[string]any{"a": 1}}}, &Confirmation{Token: "tok123", ExpiresAt: time.Unix(1700000000, 0).UTC(), Note: "test"})
+	require.NoError(t, err)
+	var parsed struct {
+		Plan         []PlanResource `json:"plan"`
+		Confirmation struct {
+			Token     string    `json:"confirmationToken"`
+			ExpiresAt time.Time `json:"expiresAt"`
+		} `json:"confirmation"`
+	}
+	require.NoError(t, json.Unmarshal([]byte(res), &parsed))
+	assert.Equal(t, "tok123", parsed.Confirmation.Token)
+	assert.Len(t, parsed.Plan, 1)
+}
+
+func TestCreatePlanResponseWithoutConfirmation(t *testing.T) {
+	res, err := CreatePlanResponse([]PlanResource{}, nil)
+	require.NoError(t, err)
+	assert.NotContains(t, res, "confirmationToken")
 }
 
 func TestCreateMcpResponseAny(t *testing.T) {

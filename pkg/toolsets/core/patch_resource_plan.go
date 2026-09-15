@@ -85,7 +85,7 @@ func (t *Tools) updateKubernetesResourcePlan(ctx context.Context, toolReq *mcp.C
 		},
 	}
 
-	mcpResponse, err := response.CreatePlanResponse(planResources)
+	mcpResponse, err := response.CreatePlanResponse(planResources, nil)
 	if err != nil {
 		zap.L().Error("failed to create plan response", zap.String("tool", "updateKubernetesResource_plan"), zap.Error(err))
 		return nil, nil, err

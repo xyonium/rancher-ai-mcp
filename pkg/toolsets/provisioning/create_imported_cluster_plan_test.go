@@ -202,11 +202,14 @@ func TestCreateImportedClusterPlan(t *testing.T) {
 				assert.Truef(t, ok, "expected type *mcp.TextContent")
 				assert.Truef(t, ok, "expected expectedResult to be a JSON string")
 
-				var obj []map[string]interface{}
-				err = json.Unmarshal([]byte(text.Text), &obj)
+				var parsed struct {
+					Plan []map[string]interface{} `json:"plan"`
+				}
+				err = json.Unmarshal([]byte(text.Text), &parsed)
 				require.NoError(t, err)
+				require.NotEmpty(t, parsed.Plan)
 
-				resultBytes, err := json.Marshal(obj[0])
+				resultBytes, err := json.Marshal(parsed.Plan[0])
 				assert.NoError(t, err)
 
 				assert.JSONEq(t, test.expectedResult, string(resultBytes), "expected result does not match actual result")
