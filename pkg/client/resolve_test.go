@@ -19,6 +19,14 @@ import (
 
 func newClientWithDiscovery(t *testing.T, resources []*metav1.APIResourceList) *Client {
 	t.Helper()
+	c, _ := newClientWithMutableDiscovery(t, resources)
+	return c
+}
+
+// newClientWithMutableDiscovery is like newClientWithDiscovery but also returns
+// the FakeDiscovery, so tests can change the served resources between calls.
+func newClientWithMutableDiscovery(t *testing.T, resources []*metav1.APIResourceList) (*Client, *fakediscovery.FakeDiscovery) {
+	t.Helper()
 	resetDiscoveryCache()
 	cs := fake.NewClientset()
 	fd, ok := cs.Discovery().(*fakediscovery.FakeDiscovery)
@@ -26,7 +34,7 @@ func newClientWithDiscovery(t *testing.T, resources []*metav1.APIResourceList) *
 	fd.Resources = resources
 	return &Client{
 		ClientSetCreator: func(*rest.Config) (kubernetes.Interface, error) { return cs, nil },
-	}
+	}, fd
 }
 
 var harvesterResources = []*metav1.APIResourceList{
@@ -99,10 +107,24 @@ func TestFetchAPIResourcesToleratesPartialFailure(t *testing.T) {
 }
 
 func TestDiscoveryCacheTTL(t *testing.T) {
-	c := newClientWithDiscovery(t, harvesterResources)
+	c, fd := newClientWithMutableDiscovery(t, harvesterResources)
 	// first call populates the cache
-	_, err := c.ResolveGVR(context.Background(), "tok", "local", "VirtualMachine", "harvesterhci.io/v1beta1")
+	gvr, err := c.ResolveGVR(context.Background(), "tok", "local", "VirtualMachine", "harvesterhci.io/v1beta1")
 	require.NoError(t, err)
+	require.Equal(t, "virtualmachines", gvr.Resource)
+
+	// change what the server serves; the resource is renamed
+	fd.Resources = []*metav1.APIResourceList{
+		{GroupVersion: "harvesterhci.io/v1beta1", APIResources: []metav1.APIResource{
+			{Name: "virtualmachines-renamed", Kind: "VirtualMachine", Namespaced: true},
+		}},
+	}
+
+	// while the cached entry is fresh it must be served, not the new server picture
+	gvr, err = c.ResolveGVR(context.Background(), "tok", "local", "VirtualMachine", "harvesterhci.io/v1beta1")
+	require.NoError(t, err)
+	assert.Equal(t, "virtualmachines", gvr.Resource, "a fresh cache entry must be served instead of refetching")
+
 	// shrink the cached entry's expiry to the past; next resolution must refetch
 	discoveryCache.Range(func(key, value any) bool {
 		e := value.(discoveryEntry)
@@ -110,6 +132,34 @@ func TestDiscoveryCacheTTL(t *testing.T) {
 		discoveryCache.Store(key, e)
 		return true
 	})
-	_, err = c.ResolveGVR(context.Background(), "tok", "local", "VirtualMachine", "harvesterhci.io/v1beta1")
+	gvr, err = c.ResolveGVR(context.Background(), "tok", "local", "VirtualMachine", "harvesterhci.io/v1beta1")
 	require.NoError(t, err)
+	assert.Equal(t, "virtualmachines-renamed", gvr.Resource, "an expired cache entry must be refetched from the server")
+}
+
+func TestResolveBustsStaleCacheOnUnknownKind(t *testing.T) {
+	// the cluster does not serve the CRD yet
+	c, fd := newClientWithMutableDiscovery(t, []*metav1.APIResourceList{
+		{GroupVersion: "v1", APIResources: []metav1.APIResource{
+			{Name: "pods", Kind: "Pod", Namespaced: true},
+		}},
+	})
+	// the failed lookup caches the (stale) picture
+	_, err := c.ResolveGVR(context.Background(), "tok", "local", "VirtualMachine", "")
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "unknown kind")
+
+	// the CRD is installed after that picture was cached
+	fd.Resources = append(fd.Resources, &metav1.APIResourceList{
+		GroupVersion: "harvesterhci.io/v1beta1", APIResources: []metav1.APIResource{
+			{Name: "virtualmachines", Kind: "VirtualMachine", Namespaced: true},
+		},
+	})
+
+	// the bust-and-retry must bypass the stale cache and find the new CRD
+	gvr, err := c.ResolveGVR(context.Background(), "tok", "local", "VirtualMachine", "")
+	require.NoError(t, err)
+	assert.Equal(t, "harvesterhci.io", gvr.Group)
+	assert.Equal(t, "v1beta1", gvr.Version)
+	assert.Equal(t, "virtualmachines", gvr.Resource)
 }
