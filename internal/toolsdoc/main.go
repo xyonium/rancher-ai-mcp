@@ -128,6 +128,7 @@ func render(infos []toolInfo) string {
 	b.WriteString("<!-- Edit the tool definitions in pkg/toolsets/**/tools.go and regenerate. -->\n\n")
 	b.WriteString("Each tool is exposed through the MCP protocol and can be invoked by the Rancher AI agent. ")
 	b.WriteString("Tools are grouped by toolset. Tools marked **Write** modify state and are only registered when the server is not running in read-only mode.\n\n")
+	b.WriteString("**Every Write tool requires a fresh plan and explicit per-operation user approval; the server enforces this with single-use confirmation tokens and a server-initiated user confirmation. Write tools never execute automatically.**\n\n")
 
 	for _, name := range toolsetNames {
 		tools := byToolset[name]
