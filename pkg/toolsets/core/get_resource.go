@@ -13,10 +13,11 @@ import (
 
 // resourceParams uniquely identifies a specific named resource within a cluster.
 type resourceParams struct {
-	Name      string `json:"name" jsonschema:"the name of the Kubernetes resource"`
-	Namespace string `json:"namespace" jsonschema:"the namespace of the resource. It must be empty for all namespaces or cluster-wide resources"`
-	Kind      string `json:"kind" jsonschema:"the kind of the Kubernetes resource (e.g. Deployment, Service)"`
-	Cluster   string `json:"cluster" jsonschema:"the name of the Kubernetes cluster managed by Rancher"`
+	Name       string `json:"name" jsonschema:"the name of the Kubernetes resource"`
+	Namespace  string `json:"namespace" jsonschema:"the namespace of the resource. It must be empty for all namespaces or cluster-wide resources"`
+	Kind       string `json:"kind" jsonschema:"the kind of the Kubernetes resource (e.g. Deployment, Service)"`
+	Cluster    string `json:"cluster" jsonschema:"the name of the Kubernetes cluster managed by Rancher"`
+	APIVersion string `json:"apiVersion,omitempty" jsonschema:"optional API group and version of the resource (e.g. harvesterhci.io/v1beta1). Provide it (or use a group-qualified kind such as harvesterhci.io/VirtualMachine) when working with custom resources or when a kind exists in multiple API groups"`
 }
 
 // getResource retrieves a specific Kubernetes resource based on the provided parameters.
@@ -24,11 +25,12 @@ func (t *Tools) getResource(ctx context.Context, toolReq *mcp.CallToolRequest, p
 	zap.L().Debug("getKubernetesResource called", zap.String("resourceKind", params.Kind), zap.String("resourceName", params.Name))
 
 	resource, err := t.client.GetResource(ctx, client.GetParams{
-		Cluster:   params.Cluster,
-		Kind:      params.Kind,
-		Namespace: params.Namespace,
-		Name:      params.Name,
-		Token:     middleware.Token(ctx),
+		Cluster:    params.Cluster,
+		Kind:       params.Kind,
+		APIVersion: params.APIVersion,
+		Namespace:  params.Namespace,
+		Name:       params.Name,
+		Token:      middleware.Token(ctx),
 	})
 	if err != nil {
 		zap.L().Error("failed to get resource", zap.String("tool", "getKubernetesResource"), zap.Error(err))

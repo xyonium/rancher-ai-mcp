@@ -5,6 +5,7 @@ import (
 	"fmt"
 
 	"github.com/rancher/rancher-ai-mcp/pkg/client"
+	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 	"k8s.io/apimachinery/pkg/runtime/schema"
 	"k8s.io/client-go/dynamic"
@@ -71,4 +72,20 @@ func (f *fakeToolsClient) GetClusterID(ctx context.Context, token string, cluste
 		return "", err
 	}
 	return f.client.GetClusterID(ctx, token, clusterNameOrID)
+}
+
+// ResolveGVR validates the token and delegates to the wrapped client.
+func (f *fakeToolsClient) ResolveGVR(ctx context.Context, token, cluster, kind, apiVersion string) (schema.GroupVersionResource, error) {
+	if err := f.validateToken(token); err != nil {
+		return schema.GroupVersionResource{}, err
+	}
+	return f.client.ResolveGVR(ctx, token, cluster, kind, apiVersion)
+}
+
+// ListAPIResources validates the token and delegates to the wrapped client.
+func (f *fakeToolsClient) ListAPIResources(ctx context.Context, token, cluster string) ([]*metav1.APIResourceList, error) {
+	if err := f.validateToken(token); err != nil {
+		return nil, err
+	}
+	return f.client.ListAPIResources(ctx, token, cluster)
 }

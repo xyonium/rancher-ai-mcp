@@ -10,6 +10,7 @@ import (
 	"github.com/rancher/rancher-ai-mcp/pkg/toolsets/core/rbac"
 	"github.com/rancher/rancher-ai-mcp/pkg/toolsets/provisioning"
 	"github.com/rancher/rancher-ai-mcp/pkg/utils"
+	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 	"k8s.io/apimachinery/pkg/runtime/schema"
 	"k8s.io/client-go/dynamic"
@@ -27,6 +28,8 @@ type toolsClient interface {
 	GetResources(ctx context.Context, params client.ListParams) ([]*unstructured.Unstructured, error)
 	CreateClientSet(ctx context.Context, token string, cluster string) (kubernetes.Interface, error)
 	GetClusterID(ctx context.Context, token string, clusterNameOrID string) (string, error)
+	ResolveGVR(ctx context.Context, token, cluster, kind, apiVersion string) (schema.GroupVersionResource, error)
+	ListAPIResources(ctx context.Context, token, cluster string) ([]*metav1.APIResourceList, error)
 }
 
 // Tools contains all tools for the MCP server
@@ -53,7 +56,10 @@ func (t *Tools) AddTools(mcpServer *mcp.Server) {
 		Meta: map[string]any{
 			toolsSetAnn: toolsSet,
 		},
-		Description: `Fetches a Kubernetes resource from the cluster. The namespace must be empty for all namespaces or cluster-wide resources.`},
+		Annotations: &mcp.ToolAnnotations{ReadOnlyHint: true},
+		Description: `Fetches a Kubernetes resource from the cluster. The namespace must be empty for all namespaces or cluster-wide resources.
+
+Supports any resource kind including custom resources. If the kind is unknown to the built-in table, it is resolved via cluster API discovery; use apiVersion or a group-qualified kind (group/Kind or Kind.group) to disambiguate, and the listAPIResources tool to discover available types.`},
 		t.getResource,
 	)
 
@@ -62,9 +68,12 @@ func (t *Tools) AddTools(mcpServer *mcp.Server) {
 		Meta: map[string]any{
 			toolsSetAnn: toolsSet,
 		},
+		Annotations: &mcp.ToolAnnotations{ReadOnlyHint: true},
 		Description: `Returns a list of Kubernetes resources. The namespace must be empty for all namespaces or cluster-wide resources. Supports an optional JSONPath predicate to filter which resources are returned.
 
-Results are paginated with limit (page size, default 100) and offset (how many resources to skip from the start, default 0). To page through results, keep limit the same and increase offset by limit each time: offset=0 is the first page, offset=100 is the second page, offset=200 is the third page, and so on (with limit=100). When more resources remain, the response includes the exact offset value to pass in for the next page.`},
+Results are paginated with limit (page size, default 100) and offset (how many resources to skip from the start, default 0). To page through results, keep limit the same and increase offset by limit each time: offset=0 is the first page, offset=100 is the second page, offset=200 is the third page, and so on (with limit=100). When more resources remain, the response includes the exact offset value to pass in for the next page.
+
+Supports any resource kind including custom resources. If the kind is unknown to the built-in table, it is resolved via cluster API discovery; use apiVersion or a group-qualified kind (group/Kind or Kind.group) to disambiguate, and the listAPIResources tool to discover available types.`},
 		t.listKubernetesResources,
 	)
 
@@ -73,6 +82,7 @@ Results are paginated with limit (page size, default 100) and offset (how many r
 		Meta: map[string]any{
 			toolsSetAnn: toolsSet,
 		},
+		Annotations: &mcp.ToolAnnotations{ReadOnlyHint: true},
 		Description: `Returns all information related to a Pod. It includes its parent Deployment or StatefulSet, the CPU and memory consumption and the logs. It must be used for troubleshooting problems with pods.`},
 		t.inspectPod,
 	)
@@ -82,6 +92,7 @@ Results are paginated with limit (page size, default 100) and offset (how many r
 		Meta: map[string]any{
 			toolsSetAnn: toolsSet,
 		},
+		Annotations: &mcp.ToolAnnotations{ReadOnlyHint: true},
 		Description: `Returns a Deployment and its Pods. It must be used for troubleshooting problems with deployments.`},
 		t.getDeploymentDetails,
 	)
@@ -91,6 +102,7 @@ Results are paginated with limit (page size, default 100) and offset (how many r
 		Meta: map[string]any{
 			toolsSetAnn: toolsSet,
 		},
+		Annotations: &mcp.ToolAnnotations{ReadOnlyHint: true},
 		Description: `Returns a list of all nodes in a specified Kubernetes cluster, including their current resource utilization metrics.`},
 		t.getNodes,
 	)
@@ -100,6 +112,7 @@ Results are paginated with limit (page size, default 100) and offset (how many r
 		Meta: map[string]any{
 			toolsSetAnn: toolsSet,
 		},
+		Annotations: &mcp.ToolAnnotations{ReadOnlyHint: true},
 		InputSchema: map[string]any{
 			"type": "object",
 			"properties": map[string]any{
@@ -121,6 +134,7 @@ Results are paginated with limit (page size, default 100) and offset (how many r
 		Meta: map[string]any{
 			toolsSetAnn: toolsSet + "," + provisioning.ToolsSet,
 		},
+		Annotations: &mcp.ToolAnnotations{ReadOnlyHint: true},
 		// InputSchema explicitly includes "properties" to satisfy OpenAI's requirement
 		// that object schemas must have a "properties" field, even when there are no parameters.
 		InputSchema: map[string]any{
@@ -130,6 +144,13 @@ Results are paginated with limit (page size, default 100) and offset (how many r
 		Description: `Returns a list of all Rancher clusters, including local and downstream clusters.`},
 		t.listClusters,
 	)
+
+	mcp.AddTool(mcpServer, &mcp.Tool{
+		Name:        "listAPIResources",
+		Meta:        map[string]any{toolsSetAnn: toolsSet},
+		Annotations: &mcp.ToolAnnotations{ReadOnlyHint: true},
+		Description: `Returns every API resource type (group, version, kind, resource, namespaced) served by the cluster, including all custom resources (CRDs). Use this tool FIRST to discover the correct kind and apiVersion before calling getKubernetesResource, listKubernetesResources, createKubernetesResource, patchKubernetesResource or deleteKubernetesResource with a custom resource.`,
+	}, t.listAPIResources)
 
 	projects.NewTools(t.client, t.cfg).AddTools(mcpServer)
 

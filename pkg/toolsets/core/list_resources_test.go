@@ -1,6 +1,7 @@
 package core
 
 import (
+	"encoding/json"
 	"testing"
 
 	"github.com/modelcontextprotocol/go-sdk/mcp"
@@ -12,6 +13,7 @@ import (
 	"github.com/stretchr/testify/require"
 	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/apimachinery/pkg/runtime/schema"
 	"k8s.io/client-go/dynamic"
@@ -112,6 +114,80 @@ func listResourcesScheme() *runtime.Scheme {
 	scheme := runtime.NewScheme()
 	_ = corev1.AddToScheme(scheme)
 	return scheme
+}
+
+// fakeVirtualMachineInLists is a custom resource served by two API groups; it
+// can only be listed once the caller passes an explicit apiVersion.
+var fakeVirtualMachineInLists = &unstructured.Unstructured{
+	Object: map[string]any{
+		"apiVersion": "harvesterhci.io/v1beta1",
+		"kind":       "VirtualMachine",
+		"metadata": map[string]any{
+			"name":      "vm-1",
+			"namespace": "default",
+		},
+	},
+}
+
+func TestListKubernetesResourcesAPIVersion(t *testing.T) {
+	fakeToken := "fakeToken"
+	newFakeDynClient := func() *dynamicfake.FakeDynamicClient {
+		return dynamicfake.NewSimpleDynamicClientWithCustomListKinds(runtime.NewScheme(), map[schema.GroupVersionResource]string{
+			{Group: "harvesterhci.io", Version: "v1beta1", Resource: "virtualmachines"}: "VirtualMachineList",
+		}, fakeVirtualMachineInLists)
+	}
+
+	tests := map[string]struct {
+		params        listKubernetesResourcesParams
+		expectedError string
+	}{
+		"list custom resource with apiVersion": {
+			params: listKubernetesResourcesParams{
+				Kind:       "VirtualMachine",
+				Namespace:  "default",
+				Cluster:    "local",
+				APIVersion: "harvesterhci.io/v1beta1",
+			},
+		},
+		"custom resource without apiVersion is ambiguous": {
+			// VirtualMachine is served by both harvesterhci.io and kubevirt.io,
+			// so discovery cannot pick one without the apiVersion hint.
+			params: listKubernetesResourcesParams{
+				Kind:      "VirtualMachine",
+				Namespace: "default",
+				Cluster:   "local",
+			},
+			expectedError: "ambiguous",
+		},
+	}
+
+	for name, tt := range tests {
+		t.Run(name, func(t *testing.T) {
+			c := &client.Client{
+				DynClientCreator: func(inConfig *rest.Config) (dynamic.Interface, error) {
+					return newFakeDynClient(), nil
+				},
+				ClientSetCreator: fakeDiscoveryClientset(t, listAPIResourcesDiscovery),
+			}
+
+			tools := NewTools(test.WrapClient(c, fakeToken), toolconfig.Config{})
+			result, _, err := tools.listKubernetesResources(middleware.WithToken(t.Context(), fakeToken), test.NewCallToolRequest(""), tt.params)
+
+			if tt.expectedError != "" {
+				assert.ErrorContains(t, err, tt.expectedError)
+				return
+			}
+			require.NoError(t, err)
+
+			var payload struct {
+				LLM []map[string]any `json:"llm"`
+			}
+			require.NoError(t, json.Unmarshal([]byte(result.Content[0].(*mcp.TextContent).Text), &payload))
+			require.Len(t, payload.LLM, 1)
+			assert.Equal(t, "harvesterhci.io/v1beta1", payload.LLM[0]["apiVersion"])
+			assert.Equal(t, "VirtualMachine", payload.LLM[0]["kind"])
+		})
+	}
 }
 
 func TestListKubernetesResources(t *testing.T) {

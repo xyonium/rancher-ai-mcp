@@ -64,7 +64,7 @@ func TestAddTools(t *testing.T) {
 	toolsResult, err := cs.ListTools(ctx, &mcp.ListToolsParams{})
 
 	assert.NoError(t, err)
-	assert.Len(t, toolsResult.Tools, 21, "incorrect number of tools registered")
+	assert.Len(t, toolsResult.Tools, 22, "incorrect number of tools registered")
 	// assert that all tools have the correct toolset annotation
 	for _, tool := range toolsResult.Tools {
 		if tool.Name == "listClusters" {
@@ -122,7 +122,27 @@ func TestAddToolsReadOnly(t *testing.T) {
 	toolsResult, err := cs.ListTools(ctx, &mcp.ListToolsParams{})
 
 	assert.NoError(t, err)
-	assert.Len(t, toolsResult.Tools, 15, "read-only mode should not register mutating tools")
+	assert.Len(t, toolsResult.Tools, 16, "read-only mode should not register mutating tools")
+
+	// Every read-only tool registered directly by this toolset must be annotated
+	// as read-only. Sub-toolsets (projects, rbac) are annotated by their own tasks.
+	coreReadOnlyTools := []string{
+		"getKubernetesResource",
+		"listKubernetesResources",
+		"listAPIResources",
+		"inspectPod",
+		"getDeployment",
+		"getNodeMetrics",
+		"getClusterImages",
+		"listClusters",
+	}
+	annotationsByTool := make(map[string]bool, len(toolsResult.Tools))
+	for _, tool := range toolsResult.Tools {
+		annotationsByTool[tool.Name] = tool.Annotations != nil && tool.Annotations.ReadOnlyHint
+	}
+	for _, name := range coreReadOnlyTools {
+		assert.True(t, annotationsByTool[name], "tool %s must be annotated as read-only", name)
+	}
 
 	toolNames := make(map[string]bool)
 	for _, tool := range toolsResult.Tools {

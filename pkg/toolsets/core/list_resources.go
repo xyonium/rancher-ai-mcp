@@ -18,6 +18,7 @@ type listKubernetesResourcesParams struct {
 	Namespace     string `json:"namespace" jsonschema:"the namespace where the resources are located. It must be empty for all namespaces or cluster-wide resources"`
 	Kind          string `json:"kind" jsonschema:"the type of Kubernetes resource (e.g., Pod, Deployment, Service)"`
 	Cluster       string `json:"cluster" jsonschema:"the name of the Kubernetes cluster"`
+	APIVersion    string `json:"apiVersion,omitempty" jsonschema:"optional API group and version of the resource (e.g. harvesterhci.io/v1beta1). Provide it (or use a group-qualified kind such as harvesterhci.io/VirtualMachine) when working with custom resources or when a kind exists in multiple API groups"`
 	Limit         int64  `json:"limit,omitempty" jsonschema:"maximum number of resources to return, defaults to 100"`
 	Offset        int64  `json:"offset,omitempty" jsonschema:"how many resources to skip from the start of the full list before returning results. Defaults to 0 (start at the first resource). Use it together with limit to page through results: set offset=0 for the first page, then increase offset by limit for each next page. For example, with limit=10: offset=0 returns resources 1-10, offset=10 returns resources 11-20, offset=20 returns resources 21-30. When more resources are available, the response tells you the exact offset to use for the next page"`
 	LabelSelector string `json:"labelSelector,omitempty" jsonschema:"optional label selector to filter resources (e.g. app=nginx)"`
@@ -31,6 +32,7 @@ func (t *Tools) listKubernetesResources(ctx context.Context, toolReq *mcp.CallTo
 	resources, err := t.client.GetResources(ctx, client.ListParams{
 		Cluster:       params.Cluster,
 		Kind:          params.Kind,
+		APIVersion:    params.APIVersion,
 		Namespace:     params.Namespace,
 		Token:         middleware.Token(ctx),
 		LabelSelector: params.LabelSelector,
