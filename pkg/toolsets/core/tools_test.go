@@ -125,7 +125,8 @@ func TestAddToolsReadOnly(t *testing.T) {
 	assert.Len(t, toolsResult.Tools, 16, "read-only mode should not register mutating tools")
 
 	// Every read-only tool registered directly by this toolset must be annotated
-	// as read-only. Sub-toolsets (projects, rbac) are annotated by their own tasks.
+	// as read-only. Sub-toolset read-only tools are annotated separately
+	// (see ledger ruling: folded into Task 10).
 	coreReadOnlyTools := []string{
 		"getKubernetesResource",
 		"listKubernetesResources",

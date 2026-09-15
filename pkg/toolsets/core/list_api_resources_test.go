@@ -184,14 +184,38 @@ func TestResolveGVRDelegationThroughFakeToolsClient(t *testing.T) {
 // package-level discovery helper: the fake's ServerPreferredResources method is
 // stubbed out and ignores the Resources field. Unlike the method, the helper
 // also drops subresources (k8s.io/client-go discovery.ServerPreferredResources).
+//
+// The fake builds its group list by ranging over a map, so the order of the
+// returned lists is nondeterministic across processes. Consequently the
+// assertions below are on membership, never on position.
 func TestDiscoveryHelperHonorsFakeResources(t *testing.T) {
 	tools := newToolsWithDiscovery(t, listAPIResourcesDiscovery)
 
 	lists, err := tools.client.ListAPIResources(t.Context(), "fakeToken", "local")
 	require.NoError(t, err)
 	require.Len(t, lists, 3)
-	assert.Equal(t, "v1", lists[0].GroupVersion)
-	assert.Len(t, lists[0].APIResources, 1, "the discovery helper drops subresources")
+
+	byGroupVersion := make(map[string]*metav1.APIResourceList, len(lists))
+	for _, list := range lists {
+		byGroupVersion[list.GroupVersion] = list
+	}
+	require.Len(t, byGroupVersion, 3, "each group version must be served exactly once")
+
+	// Subresources (pods/status, virtualmachines/status) are dropped by the helper.
+	pods, ok := byGroupVersion["v1"]
+	require.True(t, ok, "v1 must be served")
+	require.Len(t, pods.APIResources, 1)
+	assert.Equal(t, "pods", pods.APIResources[0].Name)
+
+	harvester, ok := byGroupVersion["harvesterhci.io/v1beta1"]
+	require.True(t, ok, "harvesterhci.io/v1beta1 must be served")
+	require.Len(t, harvester.APIResources, 1)
+	assert.Equal(t, "virtualmachines", harvester.APIResources[0].Name)
+
+	kubevirt, ok := byGroupVersion["kubevirt.io/v1"]
+	require.True(t, ok, "kubevirt.io/v1 must be served")
+	require.Len(t, kubevirt.APIResources, 1)
+	assert.Equal(t, "virtualmachines", kubevirt.APIResources[0].Name)
 
 	var discoveryIface discovery.DiscoveryInterface = fake.NewClientset().Discovery()
 	preferred, err := discoveryIface.ServerPreferredResources()
