@@ -12,6 +12,7 @@ import (
 	"github.com/rancher/dynamiclistener/server"
 	"github.com/rancher/rancher-ai-mcp/internal/middleware"
 	"github.com/rancher/rancher-ai-mcp/pkg/client"
+	"github.com/rancher/rancher-ai-mcp/pkg/toolconfig"
 	"github.com/rancher/rancher-ai-mcp/pkg/toolsets"
 	"github.com/rancher/wrangler/v3/pkg/generated/controllers/core"
 	"github.com/spf13/cobra"
@@ -61,7 +62,7 @@ func runServe(cmd *cobra.Command, args []string) error {
 		return fmt.Errorf("failed to create client: %w", err)
 	}
 
-	toolsets.AddAllTools(client, mcpServer, readOnly)
+	toolsets.AddAllTools(client, mcpServer, toolconfig.Config{ReadOnly: readOnly})
 
 	zap.L().Info("read-only mode", zap.Bool("enabled", readOnly))
 

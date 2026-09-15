@@ -12,6 +12,7 @@ import (
 	"strings"
 
 	"github.com/modelcontextprotocol/go-sdk/mcp"
+	"github.com/rancher/rancher-ai-mcp/pkg/toolconfig"
 	"github.com/rancher/rancher-ai-mcp/pkg/toolsets"
 )
 
@@ -36,7 +37,7 @@ func run() error {
 
 	// Tools registered in read-only mode are the read-only tools. Any tool that
 	// only appears in the full set is a write operation.
-	readOnlyTools, err := listTools(ctx, true)
+	readOnlyTools, err := listTools(ctx, toolconfig.Config{ReadOnly: true})
 	if err != nil {
 		return fmt.Errorf("listing read-only tools: %w", err)
 	}
@@ -45,7 +46,7 @@ func run() error {
 		readOnlyNames[t.Name] = struct{}{}
 	}
 
-	allTools, err := listTools(ctx, false)
+	allTools, err := listTools(ctx, toolconfig.Config{EnableExec: true})
 	if err != nil {
 		return fmt.Errorf("listing all tools: %w", err)
 	}
@@ -70,10 +71,10 @@ func run() error {
 }
 
 // listTools boots the MCP server in-memory and returns its registered tools.
-func listTools(ctx context.Context, readOnly bool) ([]*mcp.Tool, error) {
+func listTools(ctx context.Context, cfg toolconfig.Config) ([]*mcp.Tool, error) {
 	server := mcp.NewServer(&mcp.Implementation{Name: "rancher mcp server", Version: "doc-gen"}, nil)
 	// A nil client is safe here: tool handlers are never invoked, only listed.
-	toolsets.AddAllTools(nil, server, readOnly)
+	toolsets.AddAllTools(nil, server, cfg)
 
 	clientTransport, serverTransport := mcp.NewInMemoryTransports()
 

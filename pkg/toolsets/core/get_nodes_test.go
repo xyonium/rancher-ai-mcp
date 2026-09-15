@@ -7,6 +7,7 @@ import (
 	"github.com/rancher/rancher-ai-mcp/internal/middleware"
 	"github.com/rancher/rancher-ai-mcp/pkg/client"
 	"github.com/rancher/rancher-ai-mcp/pkg/client/test"
+	"github.com/rancher/rancher-ai-mcp/pkg/toolconfig"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 	corev1 "k8s.io/api/core/v1"
@@ -139,7 +140,7 @@ func TestGetNodes(t *testing.T) {
 					return tt.fakeDynClient, nil
 				},
 			}
-			tools := NewTools(test.WrapClient(c, fakeToken), false)
+			tools := NewTools(test.WrapClient(c, fakeToken), toolconfig.Config{})
 			req := test.NewCallToolRequest(tt.requestURL)
 
 			result, _, err := tools.getNodes(middleware.WithToken(t.Context(), fakeToken), req, tt.params)

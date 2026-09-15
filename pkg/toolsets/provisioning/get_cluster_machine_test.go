@@ -7,6 +7,7 @@ import (
 	"github.com/rancher/rancher-ai-mcp/internal/middleware"
 	"github.com/rancher/rancher-ai-mcp/pkg/client"
 	"github.com/rancher/rancher-ai-mcp/pkg/client/test"
+	"github.com/rancher/rancher-ai-mcp/pkg/toolconfig"
 	"github.com/stretchr/testify/assert"
 	"k8s.io/client-go/dynamic"
 	dynamicfake "k8s.io/client-go/dynamic/fake"
@@ -353,7 +354,7 @@ func TestGetClusterMachine(t *testing.T) {
 					return tt.fakeDynClient, nil
 				},
 			}
-			tools := NewTools(test.WrapClient(c, testToken), false)
+			tools := NewTools(test.WrapClient(c, testToken), toolconfig.Config{})
 			req := &mcp.CallToolRequest{}
 			req.Params = &mcp.CallToolParamsRaw{Name: "get-cluster-machine"}
 

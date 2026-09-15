@@ -11,6 +11,7 @@ import (
 
 	"github.com/modelcontextprotocol/go-sdk/mcp"
 	"github.com/rancher/rancher-ai-mcp/pkg/client"
+	"github.com/rancher/rancher-ai-mcp/pkg/toolconfig"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
@@ -18,7 +19,7 @@ import (
 func TestAllToolSets(t *testing.T) {
 	c, err := client.NewClient(true, "https://fake-url")
 	require.NoError(t, err)
-	toolsets := allToolSets(c, false)
+	toolsets := allToolSets(c, toolconfig.Config{})
 
 	assert.NotNil(t, toolsets)
 	assert.Len(t, toolsets, 3, "should have exactly 3 toolsets (core, fleet, and provisioning)")
@@ -32,7 +33,7 @@ func TestToolSchemasValidity(t *testing.T) {
 		Name:    "test-server",
 		Version: "v1.0.0",
 	}, nil)
-	AddAllTools(c, mcpServer, false)
+	AddAllTools(c, mcpServer, toolconfig.Config{})
 
 	handler := mcp.NewStreamableHTTPHandler(func(request *http.Request) *mcp.Server {
 		return mcpServer

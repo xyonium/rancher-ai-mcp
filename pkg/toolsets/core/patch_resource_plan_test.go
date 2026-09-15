@@ -7,6 +7,7 @@ import (
 	"github.com/rancher/rancher-ai-mcp/internal/middleware"
 	"github.com/rancher/rancher-ai-mcp/pkg/client"
 	"github.com/rancher/rancher-ai-mcp/pkg/client/test"
+	"github.com/rancher/rancher-ai-mcp/pkg/toolconfig"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 	appsv1 "k8s.io/api/apps/v1"
@@ -247,7 +248,7 @@ func TestUpdateKubernetesResourcePlan(t *testing.T) {
 				},
 			}
 
-			tools := NewTools(test.WrapClient(c, "test-token"), false)
+			tools := NewTools(test.WrapClient(c, "test-token"), toolconfig.Config{})
 			req := test.NewCallToolRequest("https://localhost:8080")
 			ctx := middleware.WithToken(t.Context(), "test-token")
 

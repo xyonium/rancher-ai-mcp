@@ -7,6 +7,7 @@ import (
 	"github.com/rancher/rancher-ai-mcp/internal/middleware"
 	"github.com/rancher/rancher-ai-mcp/pkg/client"
 	"github.com/rancher/rancher-ai-mcp/pkg/client/test"
+	"github.com/rancher/rancher-ai-mcp/pkg/toolconfig"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 	corev1 "k8s.io/api/core/v1"
@@ -54,7 +55,7 @@ func newProjectResourceUsageTools(t *testing.T, fakeToken, fakeURL, rancherURL s
 			return fakeDynClient, nil
 		},
 	}
-	return NewTools(test.WrapClient(c, fakeToken), false)
+	return NewTools(test.WrapClient(c, fakeToken), toolconfig.Config{})
 }
 
 func TestGetResourceUsage(t *testing.T) {

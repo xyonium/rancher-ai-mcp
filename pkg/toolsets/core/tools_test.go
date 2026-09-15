@@ -9,13 +9,14 @@ import (
 
 	"github.com/modelcontextprotocol/go-sdk/mcp"
 	"github.com/rancher/rancher-ai-mcp/pkg/client"
+	"github.com/rancher/rancher-ai-mcp/pkg/toolconfig"
 	"github.com/rancher/rancher-ai-mcp/pkg/toolsets/provisioning"
 	"github.com/stretchr/testify/assert"
 )
 
 func TestAddTools(t *testing.T) {
 	c, _ := client.NewClient(true, "")
-	tools := NewTools(c, false)
+	tools := NewTools(c, toolconfig.Config{})
 
 	// Create a test MCP server
 	mcpServer := mcp.NewServer(&mcp.Implementation{
@@ -76,7 +77,7 @@ func TestAddTools(t *testing.T) {
 
 func TestAddToolsReadOnly(t *testing.T) {
 	c, _ := client.NewClient(true, "")
-	tools := NewTools(c, true)
+	tools := NewTools(c, toolconfig.Config{ReadOnly: true})
 
 	mcpServer := mcp.NewServer(&mcp.Implementation{
 		Name:    "test-server",

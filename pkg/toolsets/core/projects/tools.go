@@ -5,6 +5,7 @@ import (
 
 	"github.com/modelcontextprotocol/go-sdk/mcp"
 	"github.com/rancher/rancher-ai-mcp/pkg/client"
+	"github.com/rancher/rancher-ai-mcp/pkg/toolconfig"
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 	"k8s.io/apimachinery/pkg/runtime/schema"
 	"k8s.io/client-go/dynamic"
@@ -25,15 +26,15 @@ type toolsClient interface {
 
 // Tools contains tools for accessing project information.
 type Tools struct {
-	client   toolsClient
-	ReadOnly bool
+	client toolsClient
+	cfg    toolconfig.Config
 }
 
 // NewTools creates and returns a new Tools instance.
-func NewTools(client toolsClient, readOnly bool) *Tools {
+func NewTools(client toolsClient, cfg toolconfig.Config) *Tools {
 	return &Tools{
-		client:   client,
-		ReadOnly: readOnly,
+		client: client,
+		cfg:    cfg,
 	}
 }
 
@@ -68,7 +69,7 @@ The resource usage includes CPU and memory requests, limits and actual usage, as
 		t.getResourceUsage,
 	)
 
-	if !t.ReadOnly {
+	if !t.cfg.ReadOnly {
 		mcp.AddTool(mcpServer, &mcp.Tool{
 			Name: "createProject",
 			Meta: map[string]any{

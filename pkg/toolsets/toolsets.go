@@ -3,6 +3,7 @@ package toolsets
 import (
 	"github.com/modelcontextprotocol/go-sdk/mcp"
 	"github.com/rancher/rancher-ai-mcp/pkg/client"
+	"github.com/rancher/rancher-ai-mcp/pkg/toolconfig"
 	"github.com/rancher/rancher-ai-mcp/pkg/toolsets/core"
 	"github.com/rancher/rancher-ai-mcp/pkg/toolsets/fleet"
 	"github.com/rancher/rancher-ai-mcp/pkg/toolsets/provisioning"
@@ -14,16 +15,16 @@ type toolsAdder interface {
 }
 
 // AddAllTools adds all available tools to the MCP server.
-func AddAllTools(client *client.Client, mcpServer *mcp.Server, readOnly bool) {
-	for _, ta := range allToolSets(client, readOnly) {
+func AddAllTools(client *client.Client, mcpServer *mcp.Server, cfg toolconfig.Config) {
+	for _, ta := range allToolSets(client, cfg) {
 		ta.AddTools(mcpServer)
 	}
 }
 
-func allToolSets(client *client.Client, readOnly bool) []toolsAdder {
+func allToolSets(client *client.Client, cfg toolconfig.Config) []toolsAdder {
 	return []toolsAdder{
-		core.NewTools(client, readOnly),
+		core.NewTools(client, cfg),
 		fleet.NewTools(client),
-		provisioning.NewTools(client, readOnly),
+		provisioning.NewTools(client, cfg),
 	}
 }

@@ -7,6 +7,7 @@ import (
 	"github.com/rancher/rancher-ai-mcp/internal/middleware"
 	"github.com/rancher/rancher-ai-mcp/pkg/client"
 	"github.com/rancher/rancher-ai-mcp/pkg/client/test"
+	"github.com/rancher/rancher-ai-mcp/pkg/toolconfig"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 	corev1 "k8s.io/api/core/v1"
@@ -112,7 +113,7 @@ func TestGetClusterImages(t *testing.T) {
 				},
 			}
 
-			tools := NewTools(test.WrapClient(c, fakeToken), false)
+			tools := NewTools(test.WrapClient(c, fakeToken), toolconfig.Config{})
 			req := &mcp.CallToolRequest{}
 
 			result, _, err := tools.getClusterImages(middleware.WithToken(t.Context(), fakeToken), req, tt.params)

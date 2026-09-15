@@ -5,6 +5,7 @@ import (
 
 	"github.com/modelcontextprotocol/go-sdk/mcp"
 	"github.com/rancher/rancher-ai-mcp/pkg/client"
+	"github.com/rancher/rancher-ai-mcp/pkg/toolconfig"
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 	"k8s.io/apimachinery/pkg/runtime/schema"
 	"k8s.io/client-go/dynamic"
@@ -27,15 +28,15 @@ type toolsClient interface {
 
 // Tools contains tools for accessing provisioning information.
 type Tools struct {
-	client   toolsClient
-	ReadOnly bool
+	client toolsClient
+	cfg    toolconfig.Config
 }
 
 // NewTools creates and returns a new Tools instance.
-func NewTools(client toolsClient, readOnly bool) *Tools {
+func NewTools(client toolsClient, cfg toolconfig.Config) *Tools {
 	return &Tools{
-		client:   client,
-		ReadOnly: readOnly,
+		client: client,
+		cfg:    cfg,
 	}
 }
 
@@ -96,7 +97,7 @@ This should be used when detailed information about a specific machine is requir
 This should only be used when information about the supported rke2 and k3s is needed. This is often required to support provisioning custom and imported clusters.`},
 		t.listSupportedKubernetesVersions)
 
-	if !t.ReadOnly {
+	if !t.cfg.ReadOnly {
 		mcp.AddTool(mcpServer, &mcp.Tool{
 			Name: "scaleClusterNodePool",
 			Meta: map[string]any{

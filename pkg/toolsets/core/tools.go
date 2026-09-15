@@ -5,6 +5,7 @@ import (
 
 	"github.com/modelcontextprotocol/go-sdk/mcp"
 	"github.com/rancher/rancher-ai-mcp/pkg/client"
+	"github.com/rancher/rancher-ai-mcp/pkg/toolconfig"
 	"github.com/rancher/rancher-ai-mcp/pkg/toolsets/core/projects"
 	"github.com/rancher/rancher-ai-mcp/pkg/toolsets/core/rbac"
 	"github.com/rancher/rancher-ai-mcp/pkg/toolsets/provisioning"
@@ -32,15 +33,15 @@ type toolsClient interface {
 type Tools struct {
 	client    toolsClient
 	paginator utils.Paginator
-	ReadOnly  bool
+	cfg       toolconfig.Config
 }
 
 // NewTools creates and returns a new Tools instance.
-func NewTools(client toolsClient, readOnly bool) *Tools {
+func NewTools(client toolsClient, cfg toolconfig.Config) *Tools {
 	return &Tools{
 		client:    client,
 		paginator: utils.NewResourcePaginator(),
-		ReadOnly:  readOnly,
+		cfg:       cfg,
 	}
 }
 
@@ -130,11 +131,11 @@ Results are paginated with limit (page size, default 100) and offset (how many r
 		t.listClusters,
 	)
 
-	projects.NewTools(t.client, t.ReadOnly).AddTools(mcpServer)
+	projects.NewTools(t.client, t.cfg).AddTools(mcpServer)
 
-	rbac.NewTools(t.client, t.ReadOnly).AddTools(mcpServer)
+	rbac.NewTools(t.client, t.cfg.ReadOnly).AddTools(mcpServer)
 
-	if !t.ReadOnly {
+	if !t.cfg.ReadOnly {
 		mcp.AddTool(mcpServer, &mcp.Tool{
 			Name: "createKubernetesResource",
 			Meta: map[string]any{

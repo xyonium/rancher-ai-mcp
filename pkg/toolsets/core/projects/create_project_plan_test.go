@@ -9,6 +9,7 @@ import (
 	"github.com/rancher/rancher-ai-mcp/pkg/client"
 	"github.com/rancher/rancher-ai-mcp/pkg/client/test"
 	"github.com/rancher/rancher-ai-mcp/pkg/response"
+	"github.com/rancher/rancher-ai-mcp/pkg/toolconfig"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
@@ -122,7 +123,7 @@ func TestCreateProjectPlan(t *testing.T) {
 	for name, tt := range tests {
 		t.Run(name, func(t *testing.T) {
 			c := &client.Client{}
-			tools := NewTools(test.WrapClient(c, fakeToken), false)
+			tools := NewTools(test.WrapClient(c, fakeToken), toolconfig.Config{})
 			req := &mcp.CallToolRequest{}
 
 			result, _, err := tools.createProjectPlan(context.Background(), req, tt.params)
