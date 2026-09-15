@@ -49,7 +49,12 @@ func (f *clientWrapper) RancherURL() string {
 	return f.client.RancherURL()
 }
 
+// CreateRestConfig validates the token and delegates to the wrapped client.
 func (f *clientWrapper) CreateRestConfig(token string, clusterID string) (*rest.Config, error) {
+	if err := f.validateToken(token); err != nil {
+		return nil, err
+	}
+
 	return f.client.CreateRestConfig(token, clusterID)
 }
 

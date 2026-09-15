@@ -15,6 +15,7 @@ import (
 	"k8s.io/apimachinery/pkg/runtime/schema"
 	"k8s.io/client-go/dynamic"
 	"k8s.io/client-go/kubernetes"
+	"k8s.io/client-go/rest"
 	"k8s.io/utils/ptr"
 )
 
@@ -31,6 +32,7 @@ type toolsClient interface {
 	GetClusterID(ctx context.Context, token string, clusterNameOrID string) (string, error)
 	ResolveGVR(ctx context.Context, token, cluster, kind, apiVersion string) (schema.GroupVersionResource, error)
 	ListAPIResources(ctx context.Context, token, cluster string) ([]*metav1.APIResourceList, error)
+	CreateRestConfig(token string, clusterID string) (*rest.Config, error)
 }
 
 // Tools contains all tools for the MCP server
@@ -236,5 +238,33 @@ Deletes a Kubernetes resource. Any resource kind is supported, including custom 
 
 Plans to delete a Kubernetes resource. It returns the current resource that would be permanently deleted, without actually deleting it in the cluster. Any resource kind is supported, including custom resources (use apiVersion or a group-qualified kind to disambiguate). The namespace must be empty for cluster-wide resources.`},
 			t.deleteKubernetesResourcePlan)
+	}
+
+	// The exec tools are the most dangerous tools this server can offer, so
+	// they are opt-in: they exist only when the operator explicitly started the
+	// server with --enable-exec (and never in read-only mode).
+	if !t.cfg.ReadOnly && t.cfg.EnableExec {
+		mcp.AddTool(mcpServer, &mcp.Tool{
+			Name: "execPod",
+			Meta: map[string]any{
+				toolsSetAnn: toolsSet,
+			},
+			Annotations: &mcp.ToolAnnotations{ReadOnlyHint: false, DestructiveHint: ptr.To(true), IdempotentHint: false, OpenWorldHint: ptr.To(false)},
+			InputSchema: execPodInputSchema(),
+			Description: `SECURITY: This tool EXECUTES AN ARBITRARY COMMAND inside a pod — the most powerful and dangerous operation this server offers. Protocol, no exceptions: (1) Call execPodPlan first and show the user the exact command. (2) Obtain the user's EXPLICIT approval for THIS EXACT command. (3) Call this tool with the confirmationToken from the plan response. The server then asks the USER DIRECTLY to approve — you cannot and MUST NOT answer on their behalf. This tool ALWAYS requires confirmation, even in auto-write mode. Approval never carries over; never chain or batch commands; never run a command the user has not seen and approved.
+
+Executes a command in a pod container (non-interactive, no shell unless explicitly requested by the user). The command runs with a 30 second timeout; stdout and stderr are captured and truncated to 64KB each.`},
+			t.execPod,
+		)
+
+		mcp.AddTool(mcpServer, &mcp.Tool{
+			Name:        "execPodPlan",
+			Meta:        map[string]any{toolsSetAnn: toolsSet},
+			Annotations: &mcp.ToolAnnotations{ReadOnlyHint: false, IdempotentHint: false, OpenWorldHint: ptr.To(false)},
+			InputSchema: execPodInputSchema(),
+			Description: `SECURITY: This tool only PLANS a command execution; it changes nothing. It validates the pod and returns the exact command plus a single-use confirmationToken. Show the exact command to the user; only after their explicit approval may execPod be called with this confirmationToken. The user is then asked directly to approve the exact command.
+
+Plans to execute an arbitrary command in a pod container (non-interactive, no shell unless explicitly requested by the user). The namespace must be the pod's namespace.`,
+		}, t.execPodPlan)
 	}
 }

@@ -69,13 +69,84 @@ func TestAddTools(t *testing.T) {
 	assert.NoError(t, err)
 	assert.Len(t, toolsResult.Tools, 24, "incorrect number of tools registered")
 	// assert that all tools have the correct toolset annotation
+	toolNames := make(map[string]bool, len(toolsResult.Tools))
 	for _, tool := range toolsResult.Tools {
+		toolNames[tool.Name] = true
 		if tool.Name == "listClusters" {
 			assert.Equal(t, toolsSet+","+provisioning.ToolsSet, tool.Meta[toolsSetAnn])
 		} else {
 			assert.Equal(t, toolsSet, tool.Meta[toolsSetAnn])
 		}
 	}
+	// The exec tools are off by default: they only exist behind --enable-exec.
+	assert.False(t, toolNames["execPod"], "execPod must not be registered without EnableExec")
+	assert.False(t, toolNames["execPodPlan"], "execPodPlan must not be registered without EnableExec")
+}
+
+// TestAddToolsExecEnabled proves --enable-exec adds exactly the exec pair on top
+// of the default set, with the wire-level safety contract of the exec tool.
+func TestAddToolsExecEnabled(t *testing.T) {
+	c, _ := client.NewClient(true, "")
+	tools := NewTools(c, toolconfig.Config{EnableExec: true})
+
+	mcpServer := mcp.NewServer(&mcp.Implementation{Name: "test-server", Version: "v1.0.0"}, nil)
+	tools.AddTools(mcpServer)
+
+	handler := mcp.NewStreamableHTTPHandler(func(request *http.Request) *mcp.Server {
+		return mcpServer
+	}, &mcp.StreamableHTTPOptions{})
+
+	listener, err := net.Listen("tcp", "127.0.0.1:0")
+	require.NoError(t, err)
+	defer listener.Close()
+
+	server := &http.Server{Handler: handler}
+	go func() {
+		server.Serve(listener)
+	}()
+	defer server.Shutdown(context.Background())
+
+	ctx := context.Background()
+	transport := &mcp.StreamableClientTransport{Endpoint: "http://" + listener.Addr().String()}
+	mcpClient := mcp.NewClient(&mcp.Implementation{Name: "mcp-client", Version: "v1.0.0"}, nil)
+
+	var cs *mcp.ClientSession
+	assert.Eventually(t, func() bool {
+		var err error
+		cs, err = mcpClient.Connect(ctx, transport, nil)
+		return err == nil
+	}, 2*time.Second, 100*time.Millisecond, "Server should start within 2 seconds")
+	require.NotNil(t, cs)
+	defer cs.Close()
+
+	toolsResult, err := cs.ListTools(ctx, &mcp.ListToolsParams{})
+	require.NoError(t, err)
+	assert.Len(t, toolsResult.Tools, 26, "enable-exec must add exactly the two exec tools")
+
+	byName := make(map[string]*mcp.Tool, len(toolsResult.Tools))
+	for _, tool := range toolsResult.Tools {
+		byName[tool.Name] = tool
+	}
+
+	exec := byName["execPod"]
+	require.NotNil(t, exec, "execPod must be registered when EnableExec is set")
+	require.NotNil(t, exec.Annotations)
+	assert.False(t, exec.Annotations.ReadOnlyHint)
+	assert.Equal(t, ptr.To(true), exec.Annotations.DestructiveHint, "exec must be advertised as destructive")
+	assert.False(t, exec.Annotations.IdempotentHint)
+	assert.Equal(t, ptr.To(false), exec.Annotations.OpenWorldHint)
+	assert.True(t, strings.HasPrefix(exec.Description, "SECURITY: "), "exec description must open with the SECURITY block")
+	assert.Contains(t, exec.Description, "confirmationToken")
+	assert.Contains(t, exec.Description, "ALWAYS requires confirmation, even in auto-write mode")
+	assert.NotContains(t, exec.Description, "Don't ask for confirmation")
+
+	plan := byName["execPodPlan"]
+	require.NotNil(t, plan, "execPodPlan must be registered when EnableExec is set")
+	require.NotNil(t, plan.Annotations)
+	assert.False(t, plan.Annotations.ReadOnlyHint)
+	assert.Nil(t, plan.Annotations.DestructiveHint, "the plan tool changes nothing and must not be marked destructive")
+	assert.True(t, strings.HasPrefix(plan.Description, "SECURITY: "), "plan description must open with the SECURITY block")
+	assert.Contains(t, plan.Description, "confirmationToken")
 }
 
 // TestPatchToolMetadata pins the safety contract advertised to clients: the
@@ -146,7 +217,9 @@ func TestPatchToolMetadata(t *testing.T) {
 
 func TestAddToolsReadOnly(t *testing.T) {
 	c, _ := client.NewClient(true, "")
-	tools := NewTools(c, toolconfig.Config{ReadOnly: true})
+	// EnableExec is set on purpose: read-only mode has the highest precedence,
+	// so the exec tools must stay unregistered even when exec is enabled.
+	tools := NewTools(c, toolconfig.Config{ReadOnly: true, EnableExec: true})
 
 	mcpServer := mcp.NewServer(&mcp.Implementation{
 		Name:    "test-server",
@@ -231,6 +304,8 @@ func TestAddToolsReadOnly(t *testing.T) {
 	assert.False(t, toolNames["createProjectPlan"], "createProjectPlan should not be registered in read-only mode")
 	assert.False(t, toolNames["deleteKubernetesResource"], "deleteKubernetesResource should not be registered in read-only mode")
 	assert.False(t, toolNames["deleteKubernetesResourcePlan"], "deleteKubernetesResourcePlan should not be registered in read-only mode")
+	assert.False(t, toolNames["execPod"], "execPod should not be registered in read-only mode, even with EnableExec")
+	assert.False(t, toolNames["execPodPlan"], "execPodPlan should not be registered in read-only mode, even with EnableExec")
 }
 
 // TestDeleteToolMetadata pins the safety contract advertised to clients: the

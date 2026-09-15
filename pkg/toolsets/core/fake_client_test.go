@@ -10,6 +10,7 @@ import (
 	"k8s.io/apimachinery/pkg/runtime/schema"
 	"k8s.io/client-go/dynamic"
 	"k8s.io/client-go/kubernetes"
+	"k8s.io/client-go/rest"
 )
 
 // fakeToolsClient wraps a *client.Client and validates tokens before delegating to the wrapped client.
@@ -88,4 +89,12 @@ func (f *fakeToolsClient) ListAPIResources(ctx context.Context, token, cluster s
 		return nil, err
 	}
 	return f.client.ListAPIResources(ctx, token, cluster)
+}
+
+// CreateRestConfig validates the token and delegates to the wrapped client.
+func (f *fakeToolsClient) CreateRestConfig(token string, clusterID string) (*rest.Config, error) {
+	if err := f.validateToken(token); err != nil {
+		return nil, err
+	}
+	return f.client.CreateRestConfig(token, clusterID)
 }
