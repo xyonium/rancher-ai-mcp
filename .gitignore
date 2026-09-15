@@ -26,3 +26,4 @@ go.work.sum
 
 # Editor/IDE
 .vscode/
+deploy/postrenderer/rendered.yaml

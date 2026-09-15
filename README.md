@@ -71,3 +71,61 @@ make generate
 --port <int>              Port to listen on (default: 9092)
 --insecure                Skip TLS verification (default: false)
 ```
+
+## Safety Model: Mandatory User Confirmation for Write Operations
+
+Every tool that modifies cluster state or executes commands is gated by the
+server, not the client:
+
+1. The agent must call the matching `*Plan` tool first. The plan response
+   contains a single-use, 10-minute `confirmationToken` bound to the exact
+   operation (HMAC-signed; any parameter change invalidates it).
+2. On the Write call, the server asks the USER directly to confirm via MCP
+   elicitation. `deleteKubernetesResource` additionally requires the user to
+   type the exact resource name.
+3. If the client does not support elicitation, Write calls fail closed.
+   `deleteKubernetesResource` and `execPod` are never exempted.
+
+### Flags and environment variables
+
+| Flag | Env | Default | Effect |
+|------|-----|---------|--------|
+| `--read-only` | — | false | register only read-only tools |
+| `--allow-auto-write` | `MCP_ALLOW_AUTO_WRITE` | false | create/update-class tools skip the token and confirmation (delete/exec unaffected). For trusted automation only |
+| `--enable-exec` | `MCP_ENABLE_EXEC` | false | register `execPod`/`execPodPlan` |
+
+## Deploying this fork with the stock rancher-ai-agent Helm chart
+
+The stock chart hardcodes the MCP container args and has no extraArgs passthrough,
+so the supported delivery paths are:
+
+1. **Image-level ENV (recommended, no chart changes).** The GitHub Action builds
+   two variants of the same commit — pick the tag by safety posture:
+
+   | Tag | `MCP_ALLOW_AUTO_WRITE` | Behavior |
+   |-----|----------------------|----------|
+   | `latest`, `<sha>`, `vX.Y.Z` | `false` | every write requires plan-token + user confirmation |
+   | `auto`, `<sha>-auto`, `vX.Y.Z-auto` | `true` | create/update-class tools execute without confirmation; delete/exec still always gated |
+
+   Then point the chart at the image:
+
+   ```yaml
+   # my-values.yaml
+   global:
+     cattle:
+       systemDefaultRegistry: ""          # disable the global registry prefix
+   aiAgent:
+     image:
+       repository: registry.suse.com/rancher/rancher-ai-agent   # keep the stock agent image
+   mcp:
+     image:
+       repository: ghcr.io/<your-github-user>/rancher-ai-mcp    # fully qualified fork image
+       tag: latest                      # safety-gated; use "auto" (or "<sha>-auto") for the auto-write variant
+   # imagePullSecrets:                    # only if the GHCR package is private
+   #   - name: ghcr-pull-secret
+   ```
+
+   `helm upgrade -i rancher-ai-agent oci://registry.suse.com/rancher/charts/rancher-ai-agent -n cattle-ai-agent-system -f my-values.yaml`
+
+2. **Post-renderer (no image rebuild):** `helm upgrade ... --post-renderer deploy/postrenderer/patch-args.sh`
+   (edit `deploy/postrenderer/kustomization.yaml` to pick the flags).

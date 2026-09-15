@@ -1,0 +1,13 @@
+resources:
+  - rendered.yaml
+patches:
+  - target:
+      kind: Deployment
+      name: rancher-mcp-server
+    patch: |-
+      - op: add
+        path: /spec/template/spec/containers/0/args/-
+        value: "--allow-auto-write"
+      - op: add
+        path: /spec/template/spec/containers/0/args/-
+        value: "--enable-exec"

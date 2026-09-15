@@ -36,4 +36,17 @@ LABEL "org.opencontainers.image.title"="Rancher MCP Server." \
 # Run as `ai-mcp` user (numeric UID/GID for non-root and K8s compatibility).
 USER ${UID}:${GID}
 
+# Safety feature toggles for the fork. The stock rancher-ai-agent Helm chart
+# hardcodes the container args, so image-level ENV is the supported way to
+# enable these without maintaining a custom chart. They can still be
+# overridden by explicit --allow-auto-write / --enable-exec flags.
+#
+# These ARG/ENV lines MUST stay at the end of the file (after the COPY):
+# the "auto" image tag is built with MCP_ALLOW_AUTO_WRITE=true and reuses
+# every cached layer except this final metadata-only ENV layer.
+ARG MCP_ALLOW_AUTO_WRITE=false
+ARG MCP_ENABLE_EXEC=false
+ENV MCP_ALLOW_AUTO_WRITE=${MCP_ALLOW_AUTO_WRITE} \
+    MCP_ENABLE_EXEC=${MCP_ENABLE_EXEC}
+
 CMD ["/usr/local/bin/mcp"]

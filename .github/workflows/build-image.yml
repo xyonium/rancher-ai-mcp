@@ -1,0 +1,85 @@
+name: Build and Push Docker Image
+on:
+  push:
+    branches: [main]
+    tags: ["v*"]
+    paths:
+      - "package/Dockerfile"
+      - "cmd/**"
+      - "internal/**"
+      - "pkg/**"
+      - "go.mod"
+      - "go.sum"
+      - "main.go"
+      - ".github/workflows/build-image.yml"
+  workflow_dispatch:
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    permissions: { contents: read, packages: write }
+    steps:
+      - uses: actions/checkout@v4
+      - uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+      - uses: docker/setup-qemu-action@v3
+      - uses: docker/setup-buildx-action@v3
+      - name: image repo
+        run: echo IMAGE_REPOSITORY=$(echo ${{ github.repository }} | tr '[:upper:]' '[:lower:]') >> $GITHUB_ENV
+      - name: version
+        run: |
+          if [ "${{ github.ref_type }}" = "tag" ]; then
+            echo IMAGE_TAG=${{ github.ref_name }} >> $GITHUB_ENV
+          else
+            echo IMAGE_TAG=${{ github.sha }} >> $GITHUB_ENV
+          fi
+
+      # Default tags: safety-gated (auto-write OFF). This is the long pole —
+      # it compiles the Go binary and exports the full layer cache.
+      - name: Build image (latest — safety-gated default)
+        uses: docker/build-push-action@v5
+        with:
+          context: .
+          file: package/Dockerfile
+          platforms: linux/amd64,linux/arm64
+          push: true
+          build-args: |
+            VERSION=${{ github.ref_name }}
+            COMMIT=${{ github.sha }}
+            MCP_ALLOW_AUTO_WRITE=false
+            MCP_ENABLE_EXEC=${{ vars.MCP_ENABLE_EXEC || 'false' }}
+          tags: |
+            ghcr.io/${{ env.IMAGE_REPOSITORY }}:latest
+            ghcr.io/${{ env.IMAGE_REPOSITORY }}:${{ env.IMAGE_TAG }}
+          labels: |
+            org.opencontainers.image.source=https://github.com/${{ github.repository }}
+            org.opencontainers.image.description=Fork of rancher-ai-mcp with arbitrary CR support and safety-gated write operations
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+
+      # Auto-write variant: identical binary; only the trailing metadata-only
+      # ENV layer differs. The Go compile and every content layer are cache
+      # hits from the previous step (same job, same gha cache scope), so this
+      # build completes in seconds and shares all blobs in the registry.
+      - name: Build image (auto — create/update auto-write enabled)
+        uses: docker/build-push-action@v5
+        with:
+          context: .
+          file: package/Dockerfile
+          platforms: linux/amd64,linux/arm64
+          push: true
+          build-args: |
+            VERSION=${{ github.ref_name }}
+            COMMIT=${{ github.sha }}
+            MCP_ALLOW_AUTO_WRITE=true
+            MCP_ENABLE_EXEC=${{ vars.MCP_ENABLE_EXEC || 'false' }}
+          tags: |
+            ghcr.io/${{ env.IMAGE_REPOSITORY }}:auto
+            ghcr.io/${{ env.IMAGE_REPOSITORY }}:${{ env.IMAGE_TAG }}-auto
+          labels: |
+            org.opencontainers.image.source=https://github.com/${{ github.repository }}
+            org.opencontainers.image.description=Fork of rancher-ai-mcp, auto-write variant: create/update-class tools skip per-operation user confirmation; delete/exec are still always gated
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
