@@ -4,6 +4,7 @@ import (
 	"context"
 	"net"
 	"net/http"
+	"strings"
 	"testing"
 	"time"
 
@@ -12,6 +13,8 @@ import (
 	"github.com/rancher/rancher-ai-mcp/pkg/toolconfig"
 	"github.com/rancher/rancher-ai-mcp/pkg/toolsets/provisioning"
 	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
+	"k8s.io/utils/ptr"
 )
 
 func TestAddTools(t *testing.T) {
@@ -73,6 +76,72 @@ func TestAddTools(t *testing.T) {
 			assert.Equal(t, toolsSet, tool.Meta[toolsSetAnn])
 		}
 	}
+}
+
+// TestPatchToolMetadata pins the safety contract advertised to clients: the
+// patch execute tool must declare its destructive nature and must never tell
+// the agent to skip user confirmation.
+func TestPatchToolMetadata(t *testing.T) {
+	c, _ := client.NewClient(true, "")
+	tools := NewTools(c, toolconfig.Config{})
+
+	mcpServer := mcp.NewServer(&mcp.Implementation{Name: "test-server", Version: "v1.0.0"}, nil)
+	tools.AddTools(mcpServer)
+
+	handler := mcp.NewStreamableHTTPHandler(func(request *http.Request) *mcp.Server {
+		return mcpServer
+	}, &mcp.StreamableHTTPOptions{})
+
+	listener, err := net.Listen("tcp", "127.0.0.1:0")
+	assert.NoError(t, err)
+	defer listener.Close()
+
+	serverAddr := "http://" + listener.Addr().String()
+	server := &http.Server{Handler: handler}
+	go func() {
+		server.Serve(listener)
+	}()
+	defer server.Shutdown(context.Background())
+
+	ctx := context.Background()
+	transport := &mcp.StreamableClientTransport{Endpoint: serverAddr}
+	mcpClient := mcp.NewClient(&mcp.Implementation{Name: "mcp-client", Version: "v1.0.0"}, nil)
+
+	var cs *mcp.ClientSession
+	assert.Eventually(t, func() bool {
+		var err error
+		cs, err = mcpClient.Connect(ctx, transport, nil)
+		return err == nil
+	}, 2*time.Second, 100*time.Millisecond, "Server should start within 2 seconds")
+	require.NotNil(t, cs)
+	defer cs.Close()
+
+	toolsResult, err := cs.ListTools(ctx, &mcp.ListToolsParams{})
+	require.NoError(t, err)
+
+	byName := make(map[string]*mcp.Tool, len(toolsResult.Tools))
+	for _, tool := range toolsResult.Tools {
+		byName[tool.Name] = tool
+	}
+
+	patch := byName["patchKubernetesResource"]
+	require.NotNil(t, patch, "patchKubernetesResource must be registered")
+	require.NotNil(t, patch.Annotations)
+	assert.False(t, patch.Annotations.ReadOnlyHint)
+	assert.Equal(t, ptr.To(true), patch.Annotations.DestructiveHint, "patch must be advertised as destructive")
+	assert.False(t, patch.Annotations.IdempotentHint)
+	assert.Equal(t, ptr.To(false), patch.Annotations.OpenWorldHint)
+	assert.True(t, strings.HasPrefix(patch.Description, "SECURITY: "), "patch description must open with the SECURITY block")
+	assert.Contains(t, patch.Description, "confirmationToken")
+	assert.NotContains(t, patch.Description, "Don't ask for confirmation")
+
+	plan := byName["patchKubernetesResourcePlan"]
+	require.NotNil(t, plan, "patchKubernetesResourcePlan must be registered")
+	require.NotNil(t, plan.Annotations)
+	assert.False(t, plan.Annotations.ReadOnlyHint)
+	assert.Nil(t, plan.Annotations.DestructiveHint, "the plan tool changes nothing and must not be marked destructive")
+	assert.True(t, strings.HasPrefix(plan.Description, "SECURITY: "), "plan description must open with the SECURITY block")
+	assert.Contains(t, plan.Description, "confirmationToken")
 }
 
 func TestAddToolsReadOnly(t *testing.T) {

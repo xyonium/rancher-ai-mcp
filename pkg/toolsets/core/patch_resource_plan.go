@@ -4,23 +4,29 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
-	"strings"
+	"time"
 
 	jsonpatch "github.com/evanphx/json-patch/v5"
 	"github.com/modelcontextprotocol/go-sdk/mcp"
 	"github.com/rancher/rancher-ai-mcp/internal/middleware"
-	"github.com/rancher/rancher-ai-mcp/pkg/converter"
+	"github.com/rancher/rancher-ai-mcp/pkg/confirm"
 	"github.com/rancher/rancher-ai-mcp/pkg/response"
 	"go.uber.org/zap"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 )
 
 // updateKubernetesResourcePlan plans an update to a Kubernetes resource using a JSON patch.
-// It returns the original resource, the patch, and what the resource would look like after applying the patch.
+// It returns the original resource, the patch, what the resource would look like after
+// applying the patch, and a single-use confirmation token for the matching Write call.
 func (t *Tools) updateKubernetesResourcePlan(ctx context.Context, toolReq *mcp.CallToolRequest, params updateKubernetesResourceParams) (*mcp.CallToolResult, any, error) {
 	zap.L().Debug("updateKubernetesResource_plan called")
 
-	resourceInterface, err := t.client.GetResourceInterface(ctx, middleware.Token(ctx), params.Namespace, params.Cluster, converter.K8sKindsToGVRs[strings.ToLower(params.Kind)])
+	gvr, err := t.client.ResolveGVR(ctx, middleware.Token(ctx), params.Cluster, params.Kind, params.APIVersion)
+	if err != nil {
+		return nil, nil, err
+	}
+
+	resourceInterface, err := t.client.GetResourceInterface(ctx, middleware.Token(ctx), params.Namespace, params.Cluster, gvr)
 	if err != nil {
 		return nil, nil, err
 	}
@@ -33,10 +39,10 @@ func (t *Tools) updateKubernetesResourcePlan(ctx context.Context, toolReq *mcp.C
 	}
 
 	// Marshal the patch and original resource
-	patchBytes, err := json.Marshal(params.Patch)
+	patchBytes, err := params.patchBytes()
 	if err != nil {
 		zap.L().Error("failed to marshal patch", zap.String("tool", "updateKubernetesResource_plan"), zap.Error(err))
-		return nil, nil, fmt.Errorf("failed to marshal patch: %w", err)
+		return nil, nil, err
 	}
 
 	originalBytes, err := json.Marshal(original.Object)
@@ -85,7 +91,19 @@ func (t *Tools) updateKubernetesResourcePlan(ctx context.Context, toolReq *mcp.C
 		},
 	}
 
-	mcpResponse, err := response.CreatePlanResponse(planResources, nil)
+	// The token binds the exact patch bytes the execute tool will send, so this
+	// must be the same canonicalization used there.
+	op := confirm.Operation{Tool: "patchKubernetesResource", Cluster: params.Cluster, Namespace: params.Namespace, Kind: params.Kind, Name: params.Name, Payload: patchBytes}
+	token, err := t.cfg.Gate.IssueToken(op)
+	if err != nil {
+		return nil, nil, err
+	}
+
+	mcpResponse, err := response.CreatePlanResponse(planResources, &response.Confirmation{
+		Token:     token,
+		ExpiresAt: time.Now().Add(t.cfg.Gate.TokenTTL).UTC(),
+		Note:      "Show this plan to the user. Only after their explicit approval, call patchKubernetesResource with this confirmationToken. The token is single-use and expires in 10 minutes.",
+	})
 	if err != nil {
 		zap.L().Error("failed to create plan response", zap.String("tool", "updateKubernetesResource_plan"), zap.Error(err))
 		return nil, nil, err

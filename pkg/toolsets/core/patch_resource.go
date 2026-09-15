@@ -5,12 +5,11 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
-	"strings"
 
 	"github.com/google/jsonschema-go/jsonschema"
 	"github.com/modelcontextprotocol/go-sdk/mcp"
 	"github.com/rancher/rancher-ai-mcp/internal/middleware"
-	"github.com/rancher/rancher-ai-mcp/pkg/converter"
+	"github.com/rancher/rancher-ai-mcp/pkg/confirm"
 	"github.com/rancher/rancher-ai-mcp/pkg/response"
 	"go.uber.org/zap"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
@@ -67,11 +66,13 @@ func (p *jsonPatchList) UnmarshalJSON(data []byte) error {
 // updateKubernetesResourceParams defines the structure for updating a general Kubernetes resource.
 // It includes fields required to uniquely identify a resource within a cluster.
 type updateKubernetesResourceParams struct {
-	Name      string        `json:"name" jsonschema:"the name of the specific resource to patch"`
-	Namespace string        `json:"namespace,omitempty" jsonschema:"the namespace where the resource is located. It must be empty for cluster-wide resources"`
-	Kind      string        `json:"kind" jsonschema:"the type of Kubernetes resource to patch (e.g., Pod, Deployment, Service)"`
-	Cluster   string        `json:"cluster" jsonschema:"the name of the Kubernetes cluster"`
-	Patch     jsonPatchList `json:"patch" jsonschema:"a JSON array of patch operation objects. Each element must be an object with 'op', 'path', and optionally 'value' fields, as defined in RFC 6902 (application/json-patch+json). Prefer a real JSON array; a stringified array is also accepted. Example: [{\"op\":\"replace\",\"path\":\"/spec/replicas\",\"value\":3}]"`
+	Name              string        `json:"name" jsonschema:"the name of the specific resource to patch"`
+	Namespace         string        `json:"namespace,omitempty" jsonschema:"the namespace where the resource is located. It must be empty for cluster-wide resources"`
+	Kind              string        `json:"kind" jsonschema:"the type of Kubernetes resource to patch. Any kind is supported, including custom resources"`
+	APIVersion        string        `json:"apiVersion,omitempty" jsonschema:"optional API group and version (e.g. harvesterhci.io/v1beta1) to disambiguate custom resources"`
+	Cluster           string        `json:"cluster" jsonschema:"the name of the Kubernetes cluster"`
+	Patch             jsonPatchList `json:"patch" jsonschema:"a JSON array of patch operation objects. Each element must be an object with 'op', 'path', and optionally 'value' fields, as defined in RFC 6902 (application/json-patch+json). Prefer a real JSON array; a stringified array is also accepted. Example: [{\"op\":\"replace\",\"path\":\"/spec/replicas\",\"value\":3}]"`
+	ConfirmationToken string        `json:"confirmationToken,omitempty" jsonschema:"REQUIRED (unless the server runs in auto-write mode): the single-use confirmationToken returned by patchKubernetesResourcePlan for THIS exact operation. Never invent, reuse, or guess a token"`
 }
 
 // patchResourceInputSchema builds the input schema for the patch tools.
@@ -91,19 +92,48 @@ func patchResourceInputSchema() *jsonschema.Schema {
 	return s
 }
 
-// updateKubernetesResource updates a specific Kubernetes resource using a JSON patch.
+// updateKubernetesResourceParams.patchBytes canonicalizes the requested patch
+// exactly once, so the bytes shown to (and approved by) the user are the same
+// bytes hashed into the plan token and sent to the cluster.
+func (p updateKubernetesResourceParams) patchBytes() ([]byte, error) {
+	patchBytes, err := json.Marshal(p.Patch)
+	if err != nil {
+		return nil, fmt.Errorf("failed to marshal patch: %w", err)
+	}
+	return patchBytes, nil
+}
+
+// updateKubernetesResource patches a specific Kubernetes resource using a JSON
+// patch. The GVR is resolved from the kind (and optional apiVersion) via cluster
+// API discovery, so custom resources are supported, and the execution is gated
+// behind a single-use plan token plus direct user confirmation.
 func (t *Tools) updateKubernetesResource(ctx context.Context, toolReq *mcp.CallToolRequest, params updateKubernetesResourceParams) (*mcp.CallToolResult, any, error) {
 	zap.L().Debug("updateKubernetesResource called")
 
-	resourceInterface, err := t.client.GetResourceInterface(ctx, middleware.Token(ctx), params.Namespace, params.Cluster, converter.K8sKindsToGVRs[strings.ToLower(params.Kind)])
+	patchBytes, err := params.patchBytes()
+	if err != nil {
+		zap.L().Error("failed to create patch", zap.String("tool", "updateKubernetesResource"), zap.Error(err))
+		return nil, nil, err
+	}
+
+	gvr, err := t.client.ResolveGVR(ctx, middleware.Token(ctx), params.Cluster, params.Kind, params.APIVersion)
 	if err != nil {
 		return nil, nil, err
 	}
 
-	patchBytes, err := json.Marshal(params.Patch)
+	op := confirm.Operation{Tool: "patchKubernetesResource", Cluster: params.Cluster, Namespace: params.Namespace, Kind: params.Kind, Name: params.Name, Payload: patchBytes}
+	summary := fmt.Sprintf("PATCH %s %s/%s in namespace %q of cluster %q with patch:\n%s", gvr.String(), params.Kind, params.Name, params.Namespace, params.Cluster, patchBytes)
+	approved, err := t.cfg.Gate.Check(ctx, toolReq.Session, op, params.ConfirmationToken, summary, "", t.cfg.AutoWrite)
 	if err != nil {
-		zap.L().Error("failed to create patch", zap.String("tool", "updateKubernetesResource"), zap.Error(err))
-		return nil, nil, fmt.Errorf("failed to marshal patch: %w", err)
+		return nil, nil, err
+	}
+	if !approved {
+		return confirm.CancelledResult(), nil, nil
+	}
+
+	resourceInterface, err := t.client.GetResourceInterface(ctx, middleware.Token(ctx), params.Namespace, params.Cluster, gvr)
+	if err != nil {
+		return nil, nil, err
 	}
 
 	obj, err := resourceInterface.Patch(ctx, params.Name, types.JSONPatchType, patchBytes, metav1.PatchOptions{})

@@ -194,8 +194,11 @@ Plans to create a resource in a Kubernetes cluster from a complete Kubernetes ma
 			Meta: map[string]any{
 				toolsSetAnn: toolsSet,
 			},
+			Annotations: &mcp.ToolAnnotations{ReadOnlyHint: false, DestructiveHint: ptr.To(true), IdempotentHint: false, OpenWorldHint: ptr.To(false)},
 			InputSchema: patchResourceInputSchema(),
-			Description: `Patches a Kubernetes resource using a JSON patch. Don't ask for confirmation. The namespace must be empty for cluster-wide resources. The content type used is application/json-patch+json. Returns the modified resource.`},
+			Description: `SECURITY: This tool MODIFIES an existing resource in the cluster. Protocol, no exceptions: (1) Call patchKubernetesResourcePlan first and show the user the exact patch. (2) Obtain the user's EXPLICIT approval for THIS EXACT patch. (3) Call this tool with the confirmationToken from the plan response. The server then asks the USER DIRECTLY to confirm — you cannot and MUST NOT answer on their behalf. Approval never carries over; never patch proactively or in batches.
+
+Patches a Kubernetes resource using a JSON patch. Any resource kind is supported, including custom resources (use apiVersion or a group-qualified kind to disambiguate). The namespace must be empty for cluster-wide resources. The content type used is application/json-patch+json. Returns the modified resource.`},
 			t.updateKubernetesResource,
 		)
 
@@ -204,8 +207,11 @@ Plans to create a resource in a Kubernetes cluster from a complete Kubernetes ma
 			Meta: map[string]any{
 				toolsSetAnn: toolsSet,
 			},
+			Annotations: &mcp.ToolAnnotations{ReadOnlyHint: false, IdempotentHint: false, OpenWorldHint: ptr.To(false)},
 			InputSchema: patchResourceInputSchema(),
-			Description: `Plans to patch a Kubernetes resource using a JSON patch. It returns the JSON representation of the planned update without actually applying it in the cluster. Only used for displaying the patch when using human validation. The namespace must be empty for cluster-wide resources. The content type used is application/json-patch+json. `},
+			Description: `SECURITY: This tool only PLANS an update; it changes nothing. It returns the planned operation plus a single-use confirmationToken. Show the plan to the user; only after their explicit approval may patchKubernetesResource be called with this confirmationToken.
+
+Plans to patch a Kubernetes resource using a JSON patch. It returns the JSON representation of the planned update without actually applying it in the cluster. Any resource kind is supported, including custom resources (use apiVersion or a group-qualified kind to disambiguate). The namespace must be empty for cluster-wide resources. The content type used is application/json-patch+json. `},
 			t.updateKubernetesResourcePlan)
 	}
 }
