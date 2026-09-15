@@ -15,6 +15,7 @@ import (
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/apimachinery/pkg/runtime/schema"
+	"k8s.io/utils/ptr"
 )
 
 const (
@@ -78,6 +79,10 @@ func TestAddTools(t *testing.T) {
 	assert.Len(t, toolsResult.Tools, 5, "incorrect number of RBAC tools registered")
 	for _, tool := range toolsResult.Tools {
 		assert.Equal(t, toolsSet, tool.Meta[toolsSetAnn])
+		// Every RBAC tool is read-only; each must be annotated as such.
+		require.NotNil(t, tool.Annotations, "tool %s must carry annotations", tool.Name)
+		assert.True(t, tool.Annotations.ReadOnlyHint, "tool %s must be annotated as read-only", tool.Name)
+		assert.Equal(t, ptr.To(false), tool.Annotations.OpenWorldHint)
 	}
 }
 
@@ -92,5 +97,8 @@ func TestAddToolsReadOnly(t *testing.T) {
 	assert.Len(t, toolsResult.Tools, 5, "incorrect number of RBAC tools registered in read-only mode")
 	for _, tool := range toolsResult.Tools {
 		assert.Equal(t, toolsSet, tool.Meta[toolsSetAnn])
+		require.NotNil(t, tool.Annotations, "tool %s must carry annotations", tool.Name)
+		assert.True(t, tool.Annotations.ReadOnlyHint, "tool %s must be annotated as read-only", tool.Name)
+		assert.Equal(t, ptr.To(false), tool.Annotations.OpenWorldHint)
 	}
 }

@@ -8,6 +8,7 @@ import (
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 	"k8s.io/apimachinery/pkg/runtime/schema"
 	"k8s.io/client-go/dynamic"
+	"k8s.io/utils/ptr"
 )
 
 const (
@@ -43,6 +44,7 @@ func (t *Tools) AddTools(mcpServer *mcp.Server) {
 		Meta: map[string]any{
 			toolsSetAnn: toolsSet,
 		},
+		Annotations: &mcp.ToolAnnotations{ReadOnlyHint: true, OpenWorldHint: ptr.To(false)},
 		Description: `List all cluster role template bindings (CRTBs) in a Rancher cluster.
 		If a user ID is specified only returns CRTBs for that user.
 		CRTBs provide users permissions as specified by a RoleTemplate at the cluster level.`},
@@ -53,6 +55,7 @@ func (t *Tools) AddTools(mcpServer *mcp.Server) {
 		Meta: map[string]any{
 			toolsSetAnn: toolsSet,
 		},
+		Annotations: &mcp.ToolAnnotations{ReadOnlyHint: true, OpenWorldHint: ptr.To(false)},
 		Description: `List all project role template bindings (PRTBs) in a Rancher cluster.
 		If a user ID is specified only returns PRTBs for that user.
 		If a project ID is specified only returns PRTBs for that project.
@@ -64,6 +67,7 @@ func (t *Tools) AddTools(mcpServer *mcp.Server) {
 		Meta: map[string]any{
 			toolsSetAnn: toolsSet,
 		},
+		Annotations: &mcp.ToolAnnotations{ReadOnlyHint: true, OpenWorldHint: ptr.To(false)},
 		InputSchema: map[string]any{
 			"type":       "object",
 			"properties": map[string]any{},
@@ -77,6 +81,7 @@ func (t *Tools) AddTools(mcpServer *mcp.Server) {
 		Meta: map[string]any{
 			toolsSetAnn: toolsSet,
 		},
+		Annotations: &mcp.ToolAnnotations{ReadOnlyHint: true, OpenWorldHint: ptr.To(false)},
 		Description: `Get a user ID by username.`},
 		t.getUser,
 	)
@@ -85,6 +90,7 @@ func (t *Tools) AddTools(mcpServer *mcp.Server) {
 		Meta: map[string]any{
 			toolsSetAnn: toolsSet,
 		},
+		Annotations: &mcp.ToolAnnotations{ReadOnlyHint: true, OpenWorldHint: ptr.To(false)},
 		Description: `Get a role template by name.`},
 		t.getRoleTemplate,
 	)

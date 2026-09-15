@@ -9,6 +9,7 @@ import (
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 	"k8s.io/apimachinery/pkg/runtime/schema"
 	"k8s.io/client-go/dynamic"
+	"k8s.io/utils/ptr"
 )
 
 const (
@@ -45,6 +46,7 @@ func (t *Tools) AddTools(mcpServer *mcp.Server) {
 		Meta: map[string]any{
 			toolsSetAnn: toolsSet,
 		},
+		Annotations: &mcp.ToolAnnotations{ReadOnlyHint: true, OpenWorldHint: ptr.To(false)},
 		Description: `Returns a project resource and its associated namespaces and members.`},
 		t.getProject,
 	)
@@ -54,6 +56,7 @@ func (t *Tools) AddTools(mcpServer *mcp.Server) {
 		Meta: map[string]any{
 			toolsSetAnn: toolsSet,
 		},
+		Annotations: &mcp.ToolAnnotations{ReadOnlyHint: true, OpenWorldHint: ptr.To(false)},
 		Description: `Returns a list of project resources for a specified cluster.`},
 		t.listProjects,
 	)
@@ -63,6 +66,7 @@ func (t *Tools) AddTools(mcpServer *mcp.Server) {
 		Meta: map[string]any{
 			toolsSetAnn: toolsSet,
 		},
+		Annotations: &mcp.ToolAnnotations{ReadOnlyHint: true, OpenWorldHint: ptr.To(false)},
 		Description: `Returns the resource usage for a namespace, project or all projects in a cluster.
 Usage totals are provided for the entire project as well as broken down by namespace.
 The resource usage includes CPU and memory requests, limits and actual usage, as well as the total number of pods.`},
@@ -75,7 +79,10 @@ The resource usage includes CPU and memory requests, limits and actual usage, as
 			Meta: map[string]any{
 				toolsSetAnn: toolsSet,
 			},
-			Description: `Creates a project resource for a specified cluster with the given containerResourceQuota.`},
+			Annotations: &mcp.ToolAnnotations{ReadOnlyHint: false, IdempotentHint: false, OpenWorldHint: ptr.To(false)},
+			Description: `SECURITY: This tool CREATES a project in the cluster and changes its state. Protocol, no exceptions: (1) Call createProjectPlan first and show the user the complete project object. (2) Obtain the user's EXPLICIT approval for THIS EXACT creation. (3) Call this tool with the confirmationToken from the plan response. The server then asks the USER DIRECTLY to confirm — you cannot and MUST NOT answer on their behalf. Approval never carries over to any other operation; never create resources proactively.
+
+Creates a project resource for a specified cluster with the given containerResourceQuota.`},
 			t.createProject)
 
 		mcp.AddTool(mcpServer, &mcp.Tool{
@@ -83,7 +90,10 @@ The resource usage includes CPU and memory requests, limits and actual usage, as
 			Meta: map[string]any{
 				toolsSetAnn: toolsSet,
 			},
-			Description: `Plans to create a project resource for a specified cluster. It returns the JSON representation of the project to be created without actually creating it in the cluster. Only used for displaying the resource when using human validation.`},
+			Annotations: &mcp.ToolAnnotations{ReadOnlyHint: false, IdempotentHint: false, OpenWorldHint: ptr.To(false)},
+			Description: `SECURITY: This tool only PLANS a creation; it changes nothing. Returns the planned operation plus a single-use confirmationToken. Show the plan to the user; only after their explicit approval may the matching Write tool be called with this token.
+
+Plans to create a project resource for a specified cluster. It returns the JSON representation of the project to be created without actually creating it in the cluster.`},
 			t.createProjectPlan)
 	}
 }

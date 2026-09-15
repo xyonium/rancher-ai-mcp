@@ -4,10 +4,12 @@ import (
 	"context"
 	"encoding/json"
 	"testing"
+	"time"
 
 	"github.com/modelcontextprotocol/go-sdk/mcp"
 	"github.com/rancher/rancher-ai-mcp/pkg/client"
 	"github.com/rancher/rancher-ai-mcp/pkg/client/test"
+	"github.com/rancher/rancher-ai-mcp/pkg/confirm"
 	"github.com/rancher/rancher-ai-mcp/pkg/response"
 	"github.com/rancher/rancher-ai-mcp/pkg/toolconfig"
 	"github.com/stretchr/testify/assert"
@@ -129,7 +131,7 @@ func TestCreateProjectPlan(t *testing.T) {
 	for name, tt := range tests {
 		t.Run(name, func(t *testing.T) {
 			c := &client.Client{}
-			tools := NewTools(test.WrapClient(c, fakeToken), toolconfig.Config{})
+			tools := NewTools(test.WrapClient(c, fakeToken), toolconfig.Config{Gate: fakeGates(t, nil)})
 			req := &mcp.CallToolRequest{}
 
 			result, _, err := tools.createProjectPlan(context.Background(), req, tt.params)
@@ -150,4 +152,57 @@ func TestCreateProjectPlan(t *testing.T) {
 			}
 		})
 	}
+}
+
+// TestCreateProjectPlanToken exercises the plan-token round trip: the token in
+// the plan response must be accepted by the same gate for the exact operation
+// the execute tool will perform. The plan key keeps its existing shape; the
+// confirmation block is additive.
+func TestCreateProjectPlanToken(t *testing.T) {
+	gate := fakeGates(t, nil)
+	tools := NewTools(test.WrapClient(&client.Client{}, "fakeToken"), toolconfig.Config{Gate: gate})
+
+	params := createProjectParams{
+		Cluster:     "local",
+		Name:        "test-project",
+		DisplayName: "Test Project",
+		Description: "A test project",
+	}
+
+	result, _, err := tools.createProjectPlan(context.Background(), &mcp.CallToolRequest{}, params)
+	require.NoError(t, err)
+
+	var parsed struct {
+		Plan         []response.PlanResource `json:"plan"`
+		Confirmation struct {
+			Token     string    `json:"confirmationToken"`
+			ExpiresAt time.Time `json:"expiresAt"`
+			Note      string    `json:"note"`
+		} `json:"confirmation"`
+	}
+	raw := result.Content[0].(*mcp.TextContent).Text
+	require.NoError(t, json.Unmarshal([]byte(raw), &parsed))
+	require.NotEmpty(t, parsed.Confirmation.Token, "plan response must carry a confirmationToken")
+	require.Len(t, parsed.Plan, 1)
+	assert.Equal(t, response.OperationCreate, parsed.Plan[0].Type)
+	assert.Equal(t, "test-project", parsed.Plan[0].Resource.Name)
+	assert.Equal(t, "local", parsed.Plan[0].Resource.Cluster)
+	assert.WithinDuration(t, time.Now().Add(gate.TokenTTL), parsed.Confirmation.ExpiresAt, time.Minute)
+
+	// The token binds the exact project object the execute tool would submit.
+	project, err := tools.createProjectObj(params)
+	require.NoError(t, err)
+	payload, err := json.Marshal(project.Object)
+	require.NoError(t, err)
+
+	err = gate.RequireToken(confirm.Operation{
+		Tool: "createProject", Cluster: "local", Kind: "project", Name: "test-project", Payload: payload,
+	}, parsed.Confirmation.Token)
+	require.NoError(t, err, "plan token must be accepted by the same gate for the exact operation")
+
+	// The token is single-use: a second validation of the same plan fails.
+	err = gate.RequireToken(confirm.Operation{
+		Tool: "createProject", Cluster: "local", Kind: "project", Name: "test-project", Payload: payload,
+	}, parsed.Confirmation.Token)
+	assert.ErrorIs(t, err, confirm.ErrTokenConsumed)
 }

@@ -2,10 +2,12 @@ package projects
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 
 	"github.com/modelcontextprotocol/go-sdk/mcp"
 	"github.com/rancher/rancher-ai-mcp/internal/middleware"
+	"github.com/rancher/rancher-ai-mcp/pkg/confirm"
 	"github.com/rancher/rancher-ai-mcp/pkg/converter"
 	"github.com/rancher/rancher-ai-mcp/pkg/response"
 	"go.uber.org/zap"
@@ -22,22 +24,48 @@ type createProjectParams struct {
 	CPUReservation    int    `json:"cpuReservation,omitempty" jsonschema:"the amount of CPU resources (mCPUs) reserved for containers in the project"`
 	MemoryLimit       int    `json:"memoryLimit,omitempty" jsonschema:"the maximum amount of memory resources (MiB) that can be used by containers in the project"`
 	MemoryReservation int    `json:"memoryReservation,omitempty" jsonschema:"the amount of memory resources (MiB) reserved for containers in the project"`
+
+	ConfirmationToken string `json:"confirmationToken,omitempty" jsonschema:"REQUIRED (unless the server runs in auto-write mode): the single-use confirmationToken returned by createProjectPlan for THIS exact operation. Never invent, reuse, or guess a token"`
 }
 
+// createProject creates a project resource. The creation is gated behind a
+// single-use plan token plus a direct user confirmation, and the user approves
+// the exact project object the tool submits.
 func (t *Tools) createProject(ctx context.Context, toolReq *mcp.CallToolRequest, params createProjectParams) (*mcp.CallToolResult, any, error) {
 	zap.L().Debug("createProject called", zap.String("cluster", params.Cluster))
+
+	project, err := t.createProjectObj(params)
+	if err != nil {
+		zap.L().Error("failed to create project object", zap.String("tool", "createProject"), zap.Error(err))
+		return nil, nil, fmt.Errorf("failed to create project object: %w", err)
+	}
+
+	// The token binds the exact project object being created: marshal it once, so
+	// the bytes shown to the user and hashed into the token come from the same
+	// canonicalization.
+	payloadBytes, err := json.Marshal(project.Object)
+	if err != nil {
+		zap.L().Error("failed to marshal project object", zap.String("tool", "createProject"), zap.Error(err))
+		return nil, nil, fmt.Errorf("failed to marshal project object: %w", err)
+	}
+
+	// createProject has no namespace parameter: the project lives in the cluster
+	// namespace, which the token already binds through the Cluster field.
+	op := confirm.Operation{Tool: "createProject", Cluster: params.Cluster, Kind: "project", Name: params.Name, Payload: payloadBytes}
+	summary := fmt.Sprintf("CREATE project %s in cluster %q with the following object:\n%s", params.Name, params.Cluster, payloadBytes)
+	approved, err := t.cfg.Gate.Check(ctx, toolReq.Session, op, params.ConfirmationToken, summary, "", t.cfg.AutoWrite)
+	if err != nil {
+		return nil, nil, err
+	}
+	if !approved {
+		return confirm.CancelledResult(), nil, nil
+	}
 
 	resourceInterface, err := t.client.GetResourceInterface(
 		ctx, middleware.Token(ctx),
 		params.Cluster, "local", converter.K8sKindsToGVRs["project"])
 	if err != nil {
 		return nil, nil, err
-	}
-
-	project, err := t.createProjectObj(params)
-	if err != nil {
-		zap.L().Error("failed to create project object", zap.String("tool", "createProject"), zap.Error(err))
-		return nil, nil, fmt.Errorf("failed to create project object: %w", err)
 	}
 
 	obj, err := resourceInterface.Create(ctx, project, metav1.CreateOptions{})
