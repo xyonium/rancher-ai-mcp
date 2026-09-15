@@ -76,8 +76,8 @@ func (c *Client) ResolveGVR(ctx context.Context, token, cluster, kind, apiVersio
 
 让 agent 先发现、再操作（分析报告 §7.1 A3)。
 
-- 参数：`cluster`（必填）、`group`（可选精确过滤）、`kind`（可选，大小写不敏感精确过滤）、`limit`/`offset`（复用现有 paginator)
-- 返回：JSON 数组 `[{group, version, kind, resource, namespaced}]`，按 group/version/kind 稳定排序
+- 参数：`cluster`（必填）、`group`（可选精确过滤）、`kind`（可选，大小写不敏感精确过滤）
+- 返回：JSON 数组 `[{group, version, kind, resource, namespaced}]`，按 group/version/kind 稳定排序，一次性全量返回（行数据小且过滤参数可收敛；现有 paginator 只适用于 unstructured 资源对象，不复用）
 - 访问级别：Read-only，所有模式注册
 
 ## 5. Feature B：写操作安全架构（五层纵深防御)
@@ -208,7 +208,7 @@ func RequireConfirmation(ctx context.Context, ss *mcp.ServerSession, summary, ty
 | `execPodPlan` | W | 返回计划 + token；仅 `--enable-exec` |
 | `execPod` | W | 参数 `cluster/namespace/name/container?/command[]/confirmationToken`；仅 `--enable-exec` |
 
-**修改（7 对 + 2)**：严格模式下全部写工具 Execute 变体增加必填 `confirmationToken` 参数；`--allow-auto-write` 模式下 create/patch 类工具注册时**不带**该参数（与 readOnly 同为注册期条件渲染）,delete/execPod 任何模式都带；全部 Plan 变体响应增加 token;`getKubernetesResource`/`listKubernetesResources`/`patchKubernetesResource` 增加可选 `apiVersion`;`createKubernetesResource` 改 manifest 驱动解析；所有写工具描述按 §5.4 重写。
+**修改（7 对 + 2)**：全部写工具 Execute 变体增加 `confirmationToken` 参数（schema 中为 optional；严格模式下运行时强制校验非空且有效，`--allow-auto-write` 模式下 create/patch 类跳过校验，delete/execPod 任何模式都强制）；全部 Plan 变体响应增加 token;`getKubernetesResource`/`listKubernetesResources`/`patchKubernetesResource` 增加可选 `apiVersion`;`createKubernetesResource` 改 manifest 驱动解析；所有写工具描述按 §5.4 重写。
 
 **注册计数**（更新 `tools_test.go` 等计数断言）：默认 strict 模式 24 个工具（21+listAPIResources+delete 对）,read-only 模式 16 个（15+listAPIResources)，开启 `--enable-exec` 再 +2。
 
