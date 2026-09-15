@@ -12,8 +12,12 @@ import (
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 	"k8s.io/apimachinery/pkg/runtime"
+	"k8s.io/apimachinery/pkg/runtime/schema"
+	fakediscovery "k8s.io/client-go/discovery/fake"
 	"k8s.io/client-go/dynamic"
 	dynamicfake "k8s.io/client-go/dynamic/fake"
+	"k8s.io/client-go/kubernetes"
+	"k8s.io/client-go/kubernetes/fake"
 	"k8s.io/client-go/rest"
 )
 
@@ -462,4 +466,62 @@ func TestNewClient_RancherURL(t *testing.T) {
 			assert.Equal(t, test.expectedURL, c.RancherURL())
 		})
 	}
+}
+
+var vmGVR = schema.GroupVersionResource{Group: "harvesterhci.io", Version: "v1beta1", Resource: "virtualmachines"}
+
+// expectedGVRs returns the distinct resource GVRs recorded on the fake dynamic
+// client, so tests can assert which GVR the generated request actually targeted.
+func expectedGVRs(dyn *dynamicfake.FakeDynamicClient) []schema.GroupVersionResource {
+	var gvrs []schema.GroupVersionResource
+	for _, action := range dyn.Actions() {
+		if action.GetResource() != (schema.GroupVersionResource{}) {
+			gvrs = append(gvrs, action.GetResource())
+		}
+	}
+	return gvrs
+}
+
+// newCRClient returns a Client backed by a fake kubernetes clientset whose
+// discovery serves the VirtualMachine CRD and a fake dynamic client with the
+// CR registered. The list kind must be registered for List calls to work.
+func newCRClient(t *testing.T, objs ...runtime.Object) (*Client, *dynamicfake.FakeDynamicClient) {
+	t.Helper()
+	resetDiscoveryCache()
+	cs := fake.NewClientset()
+	cs.Discovery().(*fakediscovery.FakeDiscovery).Resources = []*metav1.APIResourceList{
+		{GroupVersion: "harvesterhci.io/v1beta1", APIResources: []metav1.APIResource{
+			{Name: "virtualmachines", Kind: "VirtualMachine", Namespaced: true},
+		}},
+	}
+	dyn := dynamicfake.NewSimpleDynamicClientWithCustomListKinds(runtime.NewScheme(),
+		map[schema.GroupVersionResource]string{vmGVR: "VirtualMachineList"}, objs...)
+	return &Client{
+		ClientSetCreator: func(*rest.Config) (kubernetes.Interface, error) { return cs, nil },
+		DynClientCreator: func(*rest.Config) (dynamic.Interface, error) { return dyn, nil },
+	}, dyn
+}
+
+func TestGetResourceCustomCR(t *testing.T) {
+	vm := &unstructured.Unstructured{Object: map[string]any{
+		"apiVersion": "harvesterhci.io/v1beta1", "kind": "VirtualMachine",
+		"metadata": map[string]any{"name": "vm1", "namespace": "default"},
+	}}
+	c, dyn := newCRClient(t, vm)
+	obj, err := c.GetResource(context.Background(), GetParams{Cluster: "local", Kind: "VirtualMachine", APIVersion: "harvesterhci.io/v1beta1", Namespace: "default", Name: "vm1", Token: "tok"})
+	require.NoError(t, err)
+	assert.Equal(t, "vm1", obj.GetName())
+	assert.Equal(t, []schema.GroupVersionResource{vmGVR}, expectedGVRs(dyn), "the request must target the CR's GVR")
+}
+
+func TestGetResourcesCustomCRByDiscovery(t *testing.T) {
+	vm := &unstructured.Unstructured{Object: map[string]any{
+		"apiVersion": "harvesterhci.io/v1beta1", "kind": "VirtualMachine",
+		"metadata": map[string]any{"name": "vm1", "namespace": "default"},
+	}}
+	c, dyn := newCRClient(t, vm)
+	list, err := c.GetResources(context.Background(), ListParams{Cluster: "local", Kind: "virtualmachine.harvesterhci.io", Namespace: "default", Token: "tok"})
+	require.NoError(t, err)
+	assert.Len(t, list, 1)
+	assert.Equal(t, []schema.GroupVersionResource{vmGVR}, expectedGVRs(dyn), "the list must target the CR's GVR")
 }

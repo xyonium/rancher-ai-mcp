@@ -34,17 +34,19 @@ type Client struct {
 
 // GetParams holds the parameters required to get a resource from k8s.
 type GetParams struct {
-	Cluster   string // The Cluster ID.
-	Kind      string // The Kind of the Kubernetes resource (e.g., "pod", "deployment").
-	Namespace string // The Namespace of the resource (optional).
-	Name      string // The Name of the resource (optional).
-	Token     string // The authentication Token for Steve.
+	Cluster    string // The Cluster ID.
+	Kind       string // The Kind of the Kubernetes resource (e.g., "pod", "deployment").
+	APIVersion string // Optional apiVersion (e.g. "harvesterhci.io/v1beta1") to disambiguate custom resources.
+	Namespace  string // The Namespace of the resource (optional).
+	Name       string // The Name of the resource (optional).
+	Token      string // The authentication Token for Steve.
 }
 
 // ListParams holds the parameters required to list resources from k8s.
 type ListParams struct {
 	Cluster       string // The Cluster ID.
 	Kind          string // The Kind of the Kubernetes resource (e.g., "pod", "deployment").
+	APIVersion    string // Optional apiVersion (e.g. "harvesterhci.io/v1beta1") to disambiguate custom resources.
 	Namespace     string // The Namespace of the resource (optional).
 	Name          string // The Name of the resource (optional).
 	Token         string // The authentication Token for Steve.
@@ -131,7 +133,11 @@ func (c *Client) GetResourceInterface(ctx context.Context, token string, namespa
 // GetResource retrieves a single Kubernetes resource by name.
 // It returns the resource as an unstructured object or an error if the resource is not found.
 func (c *Client) GetResource(ctx context.Context, params GetParams) (*unstructured.Unstructured, error) {
-	resourceInterface, err := c.GetResourceInterface(ctx, params.Token, params.Namespace, params.Cluster, converter.K8sKindsToGVRs[strings.ToLower(params.Kind)])
+	gvr, err := c.ResolveGVR(ctx, params.Token, params.Cluster, params.Kind, params.APIVersion)
+	if err != nil {
+		return nil, err
+	}
+	resourceInterface, err := c.GetResourceInterface(ctx, params.Token, params.Namespace, params.Cluster, gvr)
 	if err != nil {
 		return nil, err
 	}
@@ -206,7 +212,11 @@ func (c *Client) GetResourceAtAnyAPIVersion(ctx context.Context, params GetParam
 // GetResources lists Kubernetes resources matching the provided parameters.
 // It supports optional label selectors for filtering and returns a slice of unstructured objects.
 func (c *Client) GetResources(ctx context.Context, params ListParams) ([]*unstructured.Unstructured, error) {
-	resourceInterface, err := c.GetResourceInterface(ctx, params.Token, params.Namespace, params.Cluster, converter.K8sKindsToGVRs[strings.ToLower(params.Kind)])
+	gvr, err := c.ResolveGVR(ctx, params.Token, params.Cluster, params.Kind, params.APIVersion)
+	if err != nil {
+		return nil, err
+	}
+	resourceInterface, err := c.GetResourceInterface(ctx, params.Token, params.Namespace, params.Cluster, gvr)
 	if err != nil {
 		return nil, err
 	}
