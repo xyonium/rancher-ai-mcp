@@ -5,7 +5,7 @@
 
 Each tool is exposed through the MCP protocol and can be invoked by the Rancher AI agent. Tools are grouped by toolset. Tools marked **Write** modify state and are only registered when the server is not running in read-only mode.
 
-**Every Write tool requires a fresh plan and explicit per-operation user approval; the server enforces this with single-use confirmation tokens and a server-initiated user confirmation. Write tools never execute automatically.**
+**Every Write tool requires a fresh plan and explicit per-operation user approval; the server enforces this with single-use confirmation tokens and a server-initiated user confirmation. Write tools never execute automatically (unless the server runs with --allow-auto-write, which exempts create/update-class tools only — deleteKubernetesResource and execPod are always gated).**
 
 ## fleet
 

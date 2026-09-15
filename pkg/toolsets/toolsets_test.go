@@ -6,6 +6,8 @@ import (
 	"fmt"
 	"net"
 	"net/http"
+	"sort"
+	"strings"
 	"testing"
 	"time"
 
@@ -23,6 +25,134 @@ func TestAllToolSets(t *testing.T) {
 
 	assert.NotNil(t, toolsets)
 	assert.Len(t, toolsets, 3, "should have exactly 3 toolsets (core, fleet, and provisioning)")
+}
+
+// TestWriteToolInventoryMatchesRegistration guards the cross-task invariant
+// that the writeTools inventory in instructions.go is exactly the set of
+// mutating tools the server really registers. A renamed or freshly added write
+// tool that is missing from (or stale in) the inventory fails here, so the
+// safety instructions can never advertise a tool set that does not match the
+// wire. Tool access is read off the MCP annotations, the same signal TOOLS.md
+// uses to mark a tool as Write.
+func TestWriteToolInventoryMatchesRegistration(t *testing.T) {
+	for _, tc := range []struct {
+		name string
+		cfg  toolconfig.Config
+	}{
+		{"default", toolconfig.Config{}},
+		{"enable-exec", toolconfig.Config{EnableExec: true}},
+		{"auto-write", toolconfig.Config{AutoWrite: true}},
+		{"auto-write+exec", toolconfig.Config{AutoWrite: true, EnableExec: true}},
+		{"read-only", toolconfig.Config{ReadOnly: true}},
+		{"read-only+exec", toolconfig.Config{ReadOnly: true, EnableExec: true}},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			registered := listAllRegisteredTools(t, tc.cfg)
+
+			if tc.cfg.ReadOnly {
+				// Read-only mode registers mutating tools ONLY. allWriteTools
+				// deliberately still names the inventory, so the comparison is
+				// against the empty set here.
+				assert.Empty(t, registeredWriteTools(registered),
+					"read-only mode must register no write tool")
+				return
+			}
+
+			want := append([]string{}, allWriteTools(tc.cfg)...)
+			// The plan tools are mutating too (they mint tokens) and the exec
+			// plan tool exists only with EnableExec; both are write-annotated
+			// and none of them is exempt from the inventory check.
+			want = append(want,
+				"createKubernetesResourcePlan",
+				"patchKubernetesResourcePlan",
+				"deleteKubernetesResourcePlan",
+				"createProjectPlan",
+				"createCustomClusterPlan",
+				"createImportedClusterPlan",
+				"createK3kClusterPlan",
+				"scaleClusterNodePoolPlan",
+			)
+			if tc.cfg.EnableExec {
+				want = append(want, "execPodPlan")
+			}
+			sort.Strings(want)
+
+			assert.Equal(t, want, registeredWriteTools(registered),
+				"the registered write tools must equal the instructions inventory plus the plan tools")
+		})
+	}
+}
+
+// TestExecToolPairRegistration pins that --enable-exec adds exactly the exec
+// pair and nothing else, and that read-only mode still wins over it.
+func TestExecToolPairRegistration(t *testing.T) {
+	for _, tc := range []struct {
+		name string
+		cfg  toolconfig.Config
+	}{
+		{"enable-exec", toolconfig.Config{EnableExec: true}},
+		{"enable-exec+auto-write", toolconfig.Config{EnableExec: true, AutoWrite: true}},
+		{"enable-exec+read-only", toolconfig.Config{EnableExec: true, ReadOnly: true}},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			registered := listAllRegisteredTools(t, tc.cfg)
+			execTools := []string{}
+			for _, name := range registeredWriteTools(registered) {
+				if strings.HasPrefix(name, "execPod") {
+					execTools = append(execTools, name)
+				}
+			}
+			if tc.cfg.ReadOnly {
+				assert.Empty(t, execTools, "read-only mode wins over EnableExec")
+				return
+			}
+			assert.Equal(t, []string{"execPod", "execPodPlan"}, execTools,
+				"EnableExec must register exactly the exec pair")
+		})
+	}
+}
+
+// listAllRegisteredTools boots the server in-memory with every toolset
+// registered under cfg and returns the tools by name.
+func listAllRegisteredTools(t *testing.T, cfg toolconfig.Config) map[string]*mcp.Tool {
+	t.Helper()
+	c, err := client.NewClient(true, "https://fake-url")
+	require.NoError(t, err)
+
+	server := mcp.NewServer(&mcp.Implementation{Name: "test-server", Version: "v1.0.0"}, nil)
+	AddAllTools(c, server, cfg)
+
+	serverTransport, clientTransport := mcp.NewInMemoryTransports()
+	serverSession, err := server.Connect(t.Context(), serverTransport, nil)
+	require.NoError(t, err)
+	defer serverSession.Close()
+
+	mcpClient := mcp.NewClient(&mcp.Implementation{Name: "test-client", Version: "v1.0.0"}, nil)
+	clientSession, err := mcpClient.Connect(t.Context(), clientTransport, nil)
+	require.NoError(t, err)
+	defer clientSession.Close()
+
+	list, err := clientSession.ListTools(t.Context(), &mcp.ListToolsParams{})
+	require.NoError(t, err)
+
+	byName := make(map[string]*mcp.Tool, len(list.Tools))
+	for _, tool := range list.Tools {
+		byName[tool.Name] = tool
+	}
+	return byName
+}
+
+// registeredWriteTools returns the sorted names of the tools that are not
+// annotated read-only.
+func registeredWriteTools(byName map[string]*mcp.Tool) []string {
+	names := make([]string, 0, len(byName))
+	for name, tool := range byName {
+		if tool.Annotations == nil || !tool.Annotations.ReadOnlyHint {
+			names = append(names, name)
+		}
+	}
+	sort.Strings(names)
+	return names
 }
 
 func TestToolSchemasValidity(t *testing.T) {

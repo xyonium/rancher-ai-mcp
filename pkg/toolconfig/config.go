@@ -17,16 +17,3 @@ type Config struct {
 	// Gate is the confirmation gate shared by all mutating tools.
 	Gate *confirm.Gate
 }
-
-// GateOrDefault returns the configured gate, creating a fresh one if nil so
-// tool handlers can never hit a nil gate.
-func (c Config) GateOrDefault() *confirm.Gate {
-	if c.Gate != nil {
-		return c.Gate
-	}
-	g, err := confirm.NewGate()
-	if err != nil {
-		panic(err) // crypto/rand failure is unrecoverable at startup
-	}
-	return g
-}

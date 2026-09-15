@@ -119,6 +119,8 @@ const (
 	OperationUpdate OperationType = "update"
 	// OperationDelete represents a resource deletion operation
 	OperationDelete OperationType = "delete"
+	// OperationExecute represents a command execution operation (execPod)
+	OperationExecute OperationType = "execute"
 )
 
 // Resource identifies a Kubernetes resource by name, kind, cluster, and namespace.

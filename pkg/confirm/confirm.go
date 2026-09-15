@@ -56,6 +56,10 @@ type tokenBody struct {
 
 // Gate issues and validates confirmation tokens and asks the user for
 // explicit confirmation through the MCP client.
+//
+// A Gate must be constructed with NewGate: the zero value is not usable and
+// panics on first use (nil nowFn and nil consumed map, and an all-zero HMAC
+// key would sign every token with a predictable key).
 type Gate struct {
 	key      [32]byte
 	mu       sync.Mutex

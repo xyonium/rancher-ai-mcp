@@ -1,13 +1,31 @@
 resources:
   - rendered.yaml
-patches:
-  - target:
-      kind: Deployment
-      name: rancher-mcp-server
-    patch: |-
-      - op: add
-        path: /spec/template/spec/containers/0/args/-
-        value: "--allow-auto-write"
-      - op: add
-        path: /spec/template/spec/containers/0/args/-
-        value: "--enable-exec"
+# The shipped default appends NO flags: the rendered deployment is exactly what
+# the chart produced (a no-op passthrough), which is the least-privilege
+# posture on the no-rebuild delivery path.
+#
+# Uncommenting this block appends privileges to the mcp container's args.
+# Each entry you keep must be a deliberate operator decision:
+#
+#   --allow-auto-write  lets create/update-class tools (createKubernetesResource,
+#                       patchKubernetesResource, createProject, createCustomCluster,
+#                       createImportedCluster, createK3kCluster, scaleClusterNodePool)
+#                       execute WITHOUT the per-operation user confirmation.
+#                       For trusted automation only.
+#   --enable-exec       registers execPod/execPodPlan, which run arbitrary commands
+#                       inside a pod container.
+#
+# deleteKubernetesResource and execPod remain fully gated regardless: even in
+# auto-write mode they still require a fresh plan, the single-use
+# confirmationToken and a server-initiated user confirmation.
+# patches:
+#   - target:
+#       kind: Deployment
+#       name: rancher-mcp-server
+#     patch: |-
+#       - op: add
+#         path: /spec/template/spec/containers/0/args/-
+#         value: "--allow-auto-write"
+#       - op: add
+#         path: /spec/template/spec/containers/0/args/-
+#         value: "--enable-exec"

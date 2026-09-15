@@ -26,4 +26,9 @@ go.work.sum
 
 # Editor/IDE
 .vscode/
+
+# post-renderer scratch output
 deploy/postrenderer/rendered.yaml
+
+# CodeGraph local index
+.codegraph/

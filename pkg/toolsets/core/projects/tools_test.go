@@ -70,6 +70,11 @@ func TestProjectsToolAnnotations(t *testing.T) {
 	require.NotNil(t, plan.Annotations)
 	assert.False(t, plan.Annotations.ReadOnlyHint, "the plan tool mints tokens and is not read-only")
 	assert.Contains(t, plan.Description, "confirmationToken")
+
+	// The plan tools advertise the mandated sentence verbatim, exactly as the
+	// provisioning suite pins it for its plan tools.
+	const planSentence = "Returns the planned operation plus a single-use confirmationToken. Show the plan to the user; only after their explicit approval may the matching Write tool be called with this token."
+	assert.Contains(t, plan.Description, planSentence, "createProjectPlan must carry the mandated sentence verbatim")
 }
 
 // TestProjectsToolsReadOnlyMode proves read-only mode registers no write tools.

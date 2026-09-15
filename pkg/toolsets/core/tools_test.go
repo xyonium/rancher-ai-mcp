@@ -440,9 +440,17 @@ func TestCreatePatchAutoWriteDescriptions(t *testing.T) {
 	assert.Contains(t, del.Description, "The server then asks the USER DIRECTLY", "delete must still demand the direct confirmation")
 	assert.Contains(t, del.Description, "ALWAYS requires confirmation, even in auto-write mode")
 
-	if exec, ok := tools["execPod"]; ok {
-		assert.Contains(t, exec.Description, "ALWAYS requires confirmation, even in auto-write mode")
-	}
+	// execPod only exists behind EnableExec, so it must be listed separately:
+	// auto-write never rewrites its description.
+	execTools := listRegisteredToolsInMemory(t, toolconfig.Config{AutoWrite: true, EnableExec: true})
+	exec, ok := execTools["execPod"]
+	require.True(t, ok, "execPod must be registered with AutoWrite + EnableExec")
+	// execPod's own wording of the direct-confirmation promise ("to approve"),
+	// verbatim from its non-auto-write description.
+	assert.Contains(t, exec.Description, "The server then asks the USER DIRECTLY to approve",
+		"exec must still demand the direct confirmation in auto-write mode")
+	assert.NotContains(t, exec.Description, "AUTO-WRITE MODE: this server executes this tool IMMEDIATELY",
+		"execPod must never get the auto-write preamble")
 }
 
 // TestCreatePatchAutoWriteDescriptionsDoNotAffectPlans pins that plan tools keep

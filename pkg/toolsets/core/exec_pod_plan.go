@@ -73,7 +73,7 @@ func (t *Tools) execPodPlan(ctx context.Context, _ *mcp.CallToolRequest, params 
 	}
 
 	planResource := response.PlanResource{
-		Type: response.OperationType("execute"),
+		Type: response.OperationExecute,
 		Resource: response.Resource{
 			Name: params.Name, Kind: "pod", Cluster: params.Cluster, Namespace: params.Namespace,
 		},

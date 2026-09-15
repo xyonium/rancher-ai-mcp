@@ -107,6 +107,14 @@ so the supported delivery paths are:
    | `latest`, `<sha>`, `vX.Y.Z` | `false` | every write requires plan-token + user confirmation |
    | `auto`, `<sha>-auto`, `vX.Y.Z-auto` | `true` | create/update-class tools execute without confirmation; delete/exec still always gated |
 
+   The repository Actions variable `MCP_ENABLE_EXEC` (default unset = `false`) is baked into BOTH
+   image tags, including `latest`: setting it to `true` ships `execPod` registration in the safe
+   tag too. Exec stays fully confirmation-gated in every mode either way.
+
+   `latest` and `auto` are floating tags, and the chart's default `imagePullPolicy: IfNotPresent`
+   means a node-local cached image is not refreshed on upgrade. For reproducible upgrades, pin an
+   immutable tag instead: `<sha>` / `<sha>-auto` (or `vX.Y.Z` / `vX.Y.Z-auto`).
+
    Then point the chart at the image:
 
    ```yaml
@@ -127,5 +135,16 @@ so the supported delivery paths are:
 
    `helm upgrade -i rancher-ai-agent oci://registry.suse.com/rancher/charts/rancher-ai-agent -n cattle-ai-agent-system -f my-values.yaml`
 
-2. **Post-renderer (no image rebuild):** `helm upgrade ... --post-renderer deploy/postrenderer/patch-args.sh`
-   (edit `deploy/postrenderer/kustomization.yaml` to pick the flags).
+2. **Post-renderer (no image rebuild):** `helm upgrade ... --post-renderer deploy/postrenderer/patch-args.sh`.
+
+   The shipped `deploy/postrenderer/kustomization.yaml` is a **no-op passthrough**: it appends no
+   flags, so the rendered deployment is exactly what the chart produced. Enabling either flag
+   requires editing that file — uncomment the `patches:` block and the entries you want.
+
+   > **WARNING:** `--allow-auto-write` lets create/update-class tools execute without
+   > per-operation user confirmation. Enable it only for trusted automation.
+
+   **Helm 4 users:** the executable-path `--post-renderer <script>` form works on **Helm 3 only**.
+   Helm ≥ 4 rejects it (`plugin: ... Type:postrenderer/v1 not found`) and requires the
+   post-renderer packaged as a `postrenderer/v1` plugin. Prefer the image-level ENV path
+   (option 1) there.
