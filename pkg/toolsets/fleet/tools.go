@@ -7,6 +7,7 @@ import (
 	"github.com/rancher/rancher-ai-mcp/pkg/client"
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 	"k8s.io/client-go/rest"
+	"k8s.io/utils/ptr"
 )
 
 const (
@@ -46,6 +47,7 @@ func (t *Tools) AddTools(mcpServer *mcp.Server) {
 		Meta: map[string]any{
 			toolsSetAnn: toolsSet,
 		},
+		Annotations: &mcp.ToolAnnotations{ReadOnlyHint: true, OpenWorldHint: ptr.To(false)},
 		Description: `Get a specific Fleet Bundle by name and workspace.`},
 		t.getBundle,
 	)
@@ -54,6 +56,7 @@ func (t *Tools) AddTools(mcpServer *mcp.Server) {
 		Meta: map[string]any{
 			toolsSetAnn: toolsSet,
 		},
+		Annotations: &mcp.ToolAnnotations{ReadOnlyHint: true, OpenWorldHint: ptr.To(false)},
 		Description: `Get a specific GitRepo by name and workspace.`},
 		t.getGitRepo,
 	)
@@ -62,6 +65,7 @@ func (t *Tools) AddTools(mcpServer *mcp.Server) {
 		Meta: map[string]any{
 			toolsSetAnn: toolsSet,
 		},
+		Annotations: &mcp.ToolAnnotations{ReadOnlyHint: true, OpenWorldHint: ptr.To(false)},
 		Description: `List all GitRepos in a workspace.`},
 		t.listGitRepos,
 	)
@@ -70,6 +74,7 @@ func (t *Tools) AddTools(mcpServer *mcp.Server) {
 		Meta: map[string]any{
 			toolsSetAnn: toolsSet,
 		},
+		Annotations: &mcp.ToolAnnotations{ReadOnlyHint: true, OpenWorldHint: ptr.To(false)},
 		Description: `Analyze Fleet resources and diagnose bundle deployment issues.
 
 This command collects diagnostic information about Fleet resources including GitRepos,

@@ -47,6 +47,7 @@ func (t *Tools) AddTools(mcpServer *mcp.Server) {
 		Meta: map[string]any{
 			toolsSetAnn: ToolsSet,
 		},
+		Annotations: &mcp.ToolAnnotations{ReadOnlyHint: true, OpenWorldHint: ptr.To(false)},
 		Description: `Gets a cluster's complete configuration including provisioning and management clusters, the CAPI cluster, CAPI machines, and machine pool configs.
 This should be used when a complete overview of the clusters current state and its configuration is required.`},
 		t.analyzeCluster)
@@ -56,6 +57,7 @@ This should be used when a complete overview of the clusters current state and i
 		Meta: map[string]any{
 			toolsSetAnn: ToolsSet,
 		},
+		Annotations: &mcp.ToolAnnotations{ReadOnlyHint: true, OpenWorldHint: ptr.To(false)},
 		Description: `Gets all Machine related resources for a cluster including Machines, MachineSets, and MachineDeployments.
 This should be used when a summary or overview of just the existing machine resources is required.`},
 		t.analyzeClusterMachines)
@@ -65,6 +67,7 @@ This should be used when a summary or overview of just the existing machine reso
 		Meta: map[string]any{
 			toolsSetAnn: ToolsSet,
 		},
+		Annotations: &mcp.ToolAnnotations{ReadOnlyHint: true, OpenWorldHint: ptr.To(false)},
 		Description: `Gets a specific machine and its parent MachineSet and MachineDeployment.
 This should be used when detailed information about a specific machine is required.`},
 		t.getClusterMachine)
@@ -86,6 +89,7 @@ This should be used when detailed information about a specific machine is requir
 				},
 			},
 		},
+		Annotations: &mcp.ToolAnnotations{ReadOnlyHint: true, OpenWorldHint: ptr.To(false)},
 		Description: `List K3k virtual clusters deployed across downstream clusters.`},
 		t.getK3kClusters)
 
@@ -94,6 +98,7 @@ This should be used when detailed information about a specific machine is requir
 		Meta: map[string]any{
 			toolsSetAnn: ToolsSet,
 		},
+		Annotations: &mcp.ToolAnnotations{ReadOnlyHint: true, OpenWorldHint: ptr.To(false)},
 		Description: `Returns the currently supported rke2 and k3s versions that can be provisioned.
 This should only be used when information about the supported rke2 and k3s is needed. This is often required to support provisioning custom and imported clusters.`},
 		t.listSupportedKubernetesVersions)

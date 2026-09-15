@@ -91,6 +91,20 @@ func TestProvisioningWriteToolMetadata(t *testing.T) {
 	}
 }
 
+// TestProvisioningReadOnlyToolAnnotations pins the safety contract advertised to
+// clients: each read-only provisioning tool must be annotated read-only.
+func TestProvisioningReadOnlyToolAnnotations(t *testing.T) {
+	tools := listRegisteredTools(t, toolconfig.Config{})
+
+	for _, name := range []string{"analyzeCluster", "analyzeClusterMachines", "getClusterMachine", "listK3kClusters", "listSupportedKubernetesVersions"} {
+		tool, ok := tools[name]
+		require.True(t, ok, "tool %s must be registered", name)
+		require.NotNil(t, tool.Annotations, "tool %s must carry annotations", name)
+		assert.True(t, tool.Annotations.ReadOnlyHint, "tool %s must be annotated as read-only", name)
+		assert.Equal(t, ptr.To(false), tool.Annotations.OpenWorldHint, "tool %s must not be open-world", name)
+	}
+}
+
 // TestProvisioningReadOnlyMode proves read-only mode registers no write tools.
 func TestProvisioningReadOnlyMode(t *testing.T) {
 	tools := listRegisteredTools(t, toolconfig.Config{ReadOnly: true})
