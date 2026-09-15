@@ -2023,7 +2023,7 @@ git commit -m "feat(cmd): add --allow-auto-write/--enable-exec flags with env fa
 
 ---
 
-### Task 13: Dockerfile ENV 注入 + GitHub Action 构建镜像 + post-renderer + README
+### Task 13: Dockerfile ENV 注入 + GitHub Action 双 tag 构建(latest/auto)+ post-renderer + README
 
 **Files:**
 - Modify: `package/Dockerfile`
@@ -2036,13 +2036,17 @@ git commit -m "feat(cmd): add --allow-auto-write/--enable-exec flags with env fa
 
 - [ ] **Step 1: Dockerfile**
 
-final stage 在 `USER` 之前加:
+final stage 在 `USER` 之后、`CMD` 之前加(必须保持 ARG/ENV 为最后的**纯元数据**层,排在 `COPY --from=builder` 之后——这样两个 tag 的构建共享 builder 编译层与全部内容层,仅末尾 ENV 层分叉):
 
 ```dockerfile
 # Safety feature toggles for the fork. The stock rancher-ai-agent Helm chart
 # hardcodes the container args, so image-level ENV is the supported way to
 # enable these without maintaining a custom chart. They can still be
 # overridden by explicit --allow-auto-write / --enable-exec flags.
+#
+# These ARG/ENV lines MUST stay at the end of the file (after the COPY):
+# the "auto" image tag is built with MCP_ALLOW_AUTO_WRITE=true and reuses
+# every cached layer except this final metadata-only ENV layer.
 ARG MCP_ALLOW_AUTO_WRITE=false
 ARG MCP_ENABLE_EXEC=false
 ENV MCP_ALLOW_AUTO_WRITE=${MCP_ALLOW_AUTO_WRITE} \
@@ -2051,7 +2055,7 @@ ENV MCP_ALLOW_AUTO_WRITE=${MCP_ALLOW_AUTO_WRITE} \
 
 本地验证:`docker buildx build --build-arg MCP_ALLOW_AUTO_WRITE=true -f package/Dockerfile -t rancher-ai-mcp:test .`(可选,CI 会跑);至少 `docker build --target builder` 确保语法正确。若无 docker 环境则跳过并在提交信息中注明。
 
-- [ ] **Step 2: `.github/workflows/build-image.yml`**(参照用户 reach-mcp 的 build-docker.yml 模式)
+- [ ] **Step 2: `.github/workflows/build-image.yml`**(参照用户 reach-mcp 的 build-docker.yml 模式;**一次 workflow 产出两个 tag**:`latest`/`<sha>` 为安全默认,`auto`/`<sha>-auto` 烘焙 `MCP_ALLOW_AUTO_WRITE=true`)
 
 ```yaml
 name: Build and Push Docker Image
@@ -2091,7 +2095,11 @@ jobs:
           else
             echo IMAGE_TAG=${{ github.sha }} >> $GITHUB_ENV
           fi
-      - uses: docker/build-push-action@v5
+
+      # Default tags: safety-gated (auto-write OFF). This is the long pole —
+      # it compiles the Go binary and exports the full layer cache.
+      - name: Build image (latest — safety-gated default)
+        uses: docker/build-push-action@v5
         with:
           context: .
           file: package/Dockerfile
@@ -2100,7 +2108,7 @@ jobs:
           build-args: |
             VERSION=${{ github.ref_name }}
             COMMIT=${{ github.sha }}
-            MCP_ALLOW_AUTO_WRITE=${{ vars.MCP_ALLOW_AUTO_WRITE || 'false' }}
+            MCP_ALLOW_AUTO_WRITE=false
             MCP_ENABLE_EXEC=${{ vars.MCP_ENABLE_EXEC || 'false' }}
           tags: |
             ghcr.io/${{ env.IMAGE_REPOSITORY }}:latest
@@ -2110,9 +2118,34 @@ jobs:
             org.opencontainers.image.description=Fork of rancher-ai-mcp with arbitrary CR support and safety-gated write operations
           cache-from: type=gha
           cache-to: type=gha,mode=max
+
+      # Auto-write variant: identical binary; only the trailing metadata-only
+      # ENV layer differs. The Go compile and every content layer are cache
+      # hits from the previous step (same job, same gha cache scope), so this
+      # build completes in seconds and shares all blobs in the registry.
+      - name: Build image (auto — create/update auto-write enabled)
+        uses: docker/build-push-action@v5
+        with:
+          context: .
+          file: package/Dockerfile
+          platforms: linux/amd64,linux/arm64
+          push: true
+          build-args: |
+            VERSION=${{ github.ref_name }}
+            COMMIT=${{ github.sha }}
+            MCP_ALLOW_AUTO_WRITE=true
+            MCP_ENABLE_EXEC=${{ vars.MCP_ENABLE_EXEC || 'false' }}
+          tags: |
+            ghcr.io/${{ env.IMAGE_REPOSITORY }}:auto
+            ghcr.io/${{ env.IMAGE_REPOSITORY }}:${{ env.IMAGE_TAG }}-auto
+          labels: |
+            org.opencontainers.image.source=https://github.com/${{ github.repository }}
+            org.opencontainers.image.description=Fork of rancher-ai-mcp, auto-write variant: create/update-class tools skip per-operation user confirmation; delete/exec are still always gated
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
 ```
 
-> 说明:tag 推送与 main 分支推送都会触发;`IMAGE_TAG` 对 tag 用版本号、对分支用 commit SHA。`vars.MCP_ALLOW_AUTO_WRITE` / `vars.MCP_ENABLE_EXEC` 是 repo 级 Actions variables(未设置时默认 `false`),在 README 交付说明中向用户指出。
+> 说明:一次 push 生成四个 tag:`latest`、`<sha>`(安全默认)与 `auto`、`<sha>-auto`(自动写);打版本 tag 时对应为 `v1.2.3` / `v1.2.3-auto`。两个 build step 位于同一 job,第二步的 `cache-from: type=gha` 命中第一步 `cache-to: type=gha,mode=max` 导出的全部层,仅重建末尾 ENV 元数据层(秒级)。`vars.MCP_ENABLE_EXEC` 是 repo 级 Actions variable(未设置时默认 `false`),对两个变体同时生效;`MCP_ALLOW_AUTO_WRITE` 不再走 variable——`latest` 恒 false、`auto` 恒 true,行为确定。
 
 - [ ] **Step 3: post-renderer(免重建镜像的替代路径)**
 
@@ -2182,10 +2215,15 @@ server, not the client:
 The stock chart hardcodes the MCP container args and has no extraArgs passthrough,
 so the supported delivery paths are:
 
-1. **Image-level ENV (recommended, no chart changes).** Build the fork image
-   with the toggles baked in — `docker buildx build --build-arg MCP_ALLOW_AUTO_WRITE=true ...`
-   (the GitHub Action does this from the repo variables `MCP_ALLOW_AUTO_WRITE` /
-   `MCP_ENABLE_EXEC`). Then point the chart at the image:
+1. **Image-level ENV (recommended, no chart changes).** The GitHub Action builds
+   two variants of the same commit — pick the tag by safety posture:
+
+   | Tag | `MCP_ALLOW_AUTO_WRITE` | Behavior |
+   |-----|----------------------|----------|
+   | `latest`, `<sha>`, `vX.Y.Z` | `false` | every write requires plan-token + user confirmation |
+   | `auto`, `<sha>-auto`, `vX.Y.Z-auto` | `true` | create/update-class tools execute without confirmation; delete/exec still always gated |
+
+   Then point the chart at the image:
 
    ```yaml
    # my-values.yaml
@@ -2198,7 +2236,7 @@ so the supported delivery paths are:
    mcp:
      image:
        repository: ghcr.io/<your-github-user>/rancher-ai-mcp    # fully qualified fork image
-       tag: latest                      # or a commit SHA / version tag
+       tag: latest                      # safety-gated; use "auto" (or "<sha>-auto") for the auto-write variant
    # imagePullSecrets:                    # only if the GHCR package is private
    #   - name: ghcr-pull-secret
    ```
