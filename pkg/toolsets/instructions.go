@@ -44,27 +44,37 @@ func allWriteTools(cfg toolconfig.Config) []string {
 	return names
 }
 
-// renderToolList wraps the write tool inventory: 3-space indented continuation
-// lines, broken before exceeding 77 characters, so the rendered rule 1 matches
-// the spec's hard-wrapped template line for the default strict configuration.
-func renderToolList(names []string) string {
+// toolListWidth is the column budget the write tool inventory is wrapped into.
+const toolListWidth = 77
+
+// renderToolList renders the write tool inventory as rule 1 of the safety
+// instructions: firstPrefix opens the first line (the "1. Tools marked as
+// Write (" of the rule), the inventory continues on 3-space indented
+// continuation lines, and the list closes with ")". The prefix and the closing
+// paren both count against toolListWidth, which is what makes the rendered
+// rule match the spec's hard-wrapped template exactly for both the default and
+// the --enable-exec inventories.
+func renderToolList(names []string, firstPrefix string) string {
 	var b strings.Builder
-	line := ""
+	line := firstPrefix
+	lineHasItems := false
 	for i, name := range names {
-		item := name
-		if i < len(names)-1 {
-			item += ","
+		item := name + ","
+		if i == len(names)-1 {
+			item = name + ")"
 		}
 		sep := ""
-		if line != "" {
+		if lineHasItems {
 			sep = " "
 		}
-		if len(line)+len(sep)+len(item) > 77 {
+		if len(line)+len(sep)+len(item) > toolListWidth {
 			b.WriteString(line)
-			b.WriteString("\n   ")
-			line, sep = "", ""
+			b.WriteString("\n")
+			line, lineHasItems = "   ", false
+			sep = ""
 		}
 		line += sep + item
+		lineHasItems = true
 	}
 	b.WriteString(line)
 	return b.String()
@@ -84,11 +94,11 @@ func readOnlyInstructions() string {
 }
 
 func strictInstructions(cfg toolconfig.Config) string {
-	tools := renderToolList(allWriteTools(cfg))
+	tools := renderToolList(allWriteTools(cfg), "1. Tools marked as Write (")
 
 	var b strings.Builder
 	b.WriteString("SAFETY RULES — YOU MUST OBEY THESE AT ALL TIMES, WITHOUT EXCEPTION:\n\n")
-	fmt.Fprintf(&b, `1. Tools marked as Write (%s)
+	fmt.Fprintf(&b, `%s
    MODIFY cluster state or EXECUTE commands inside pods. They are DANGEROUS.
 
 2. NEVER call a Write tool unless the user has EXPLICITLY requested this exact
@@ -121,7 +131,7 @@ func strictInstructions(cfg toolconfig.Config) string {
 }
 
 func autoWriteInstructions(cfg toolconfig.Config) string {
-	tools := renderToolList(allWriteTools(cfg))
+	tools := renderToolList(allWriteTools(cfg), "1. Tools marked as Write (")
 
 	// The delete/exec protocol rule names exactly the tools that are exempt
 	// from auto-write and actually registered.
@@ -139,7 +149,7 @@ func autoWriteInstructions(cfg toolconfig.Config) string {
 	b.WriteString("This server is running in auto-write mode (--allow-auto-write): the operator\n" +
 		"explicitly allowed create/update-class tools to execute without per-operation\n" +
 		"user confirmation. delete and exec tools are NOT exempt.\n\n")
-	fmt.Fprintf(&b, `1. Tools marked as Write (%s)
+	fmt.Fprintf(&b, `%s
    MODIFY cluster state or EXECUTE commands inside pods. They are DANGEROUS.
 
 2. The server is running in AUTO-WRITE mode: create/update-class tools
