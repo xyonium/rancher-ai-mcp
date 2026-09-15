@@ -213,5 +213,28 @@ Patches a Kubernetes resource using a JSON patch. Any resource kind is supported
 
 Plans to patch a Kubernetes resource using a JSON patch. It returns the JSON representation of the planned update without actually applying it in the cluster. Any resource kind is supported, including custom resources (use apiVersion or a group-qualified kind to disambiguate). The namespace must be empty for cluster-wide resources. The content type used is application/json-patch+json. `},
 			t.updateKubernetesResourcePlan)
+
+		mcp.AddTool(mcpServer, &mcp.Tool{
+			Name: "deleteKubernetesResource",
+			Meta: map[string]any{
+				toolsSetAnn: toolsSet,
+			},
+			Annotations: &mcp.ToolAnnotations{ReadOnlyHint: false, DestructiveHint: ptr.To(true), IdempotentHint: false, OpenWorldHint: ptr.To(false)},
+			Description: `SECURITY: This tool PERMANENTLY DELETES a resource from the cluster. This is irreversible. Protocol, no exceptions: (1) Call deleteKubernetesResourcePlan first and show the user the full resource that will be deleted. (2) Obtain the user's EXPLICIT approval for THIS EXACT deletion. (3) Call this tool with the confirmationToken from the plan response. The server then asks the USER DIRECTLY to type the resource name to confirm — you cannot and MUST NOT answer on their behalf. This tool ALWAYS requires confirmation, even in auto-write mode. Approval never carries over; NEVER batch deletions; NEVER delete proactively.
+
+Deletes a Kubernetes resource. Any resource kind is supported, including custom resources (use apiVersion or a group-qualified kind to disambiguate). The namespace must be empty for cluster-wide resources.`},
+			t.deleteKubernetesResource,
+		)
+
+		mcp.AddTool(mcpServer, &mcp.Tool{
+			Name: "deleteKubernetesResourcePlan",
+			Meta: map[string]any{
+				toolsSetAnn: toolsSet,
+			},
+			Annotations: &mcp.ToolAnnotations{ReadOnlyHint: false, IdempotentHint: false, OpenWorldHint: ptr.To(false)},
+			Description: `SECURITY: This tool only PLANS a deletion; it changes nothing. It fetches the resource and returns it together with a single-use confirmationToken. Show the plan to the user; only after their explicit approval may deleteKubernetesResource be called with this confirmationToken.
+
+Plans to delete a Kubernetes resource. It returns the current resource that would be permanently deleted, without actually deleting it in the cluster. Any resource kind is supported, including custom resources (use apiVersion or a group-qualified kind to disambiguate). The namespace must be empty for cluster-wide resources.`},
+			t.deleteKubernetesResourcePlan)
 	}
 }

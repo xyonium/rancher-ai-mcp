@@ -67,7 +67,7 @@ func TestAddTools(t *testing.T) {
 	toolsResult, err := cs.ListTools(ctx, &mcp.ListToolsParams{})
 
 	assert.NoError(t, err)
-	assert.Len(t, toolsResult.Tools, 22, "incorrect number of tools registered")
+	assert.Len(t, toolsResult.Tools, 24, "incorrect number of tools registered")
 	// assert that all tools have the correct toolset annotation
 	for _, tool := range toolsResult.Tools {
 		if tool.Name == "listClusters" {
@@ -229,4 +229,74 @@ func TestAddToolsReadOnly(t *testing.T) {
 	assert.False(t, toolNames["createKubernetesResourcePlan"], "createKubernetesResourcePlan should not be registered in read-only mode")
 	assert.False(t, toolNames["createProject"], "createProject should not be registered in read-only mode")
 	assert.False(t, toolNames["createProjectPlan"], "createProjectPlan should not be registered in read-only mode")
+	assert.False(t, toolNames["deleteKubernetesResource"], "deleteKubernetesResource should not be registered in read-only mode")
+	assert.False(t, toolNames["deleteKubernetesResourcePlan"], "deleteKubernetesResourcePlan should not be registered in read-only mode")
+}
+
+// TestDeleteToolMetadata pins the safety contract advertised to clients: the
+// delete execute tool must declare its destructive nature, must state that it
+// is never exempted from confirmation, and must never tell the agent to skip
+// user confirmation.
+func TestDeleteToolMetadata(t *testing.T) {
+	c, _ := client.NewClient(true, "")
+	tools := NewTools(c, toolconfig.Config{})
+
+	mcpServer := mcp.NewServer(&mcp.Implementation{Name: "test-server", Version: "v1.0.0"}, nil)
+	tools.AddTools(mcpServer)
+
+	handler := mcp.NewStreamableHTTPHandler(func(request *http.Request) *mcp.Server {
+		return mcpServer
+	}, &mcp.StreamableHTTPOptions{})
+
+	listener, err := net.Listen("tcp", "127.0.0.1:0")
+	assert.NoError(t, err)
+	defer listener.Close()
+
+	serverAddr := "http://" + listener.Addr().String()
+	server := &http.Server{Handler: handler}
+	go func() {
+		server.Serve(listener)
+	}()
+	defer server.Shutdown(context.Background())
+
+	ctx := context.Background()
+	transport := &mcp.StreamableClientTransport{Endpoint: serverAddr}
+	mcpClient := mcp.NewClient(&mcp.Implementation{Name: "mcp-client", Version: "v1.0.0"}, nil)
+
+	var cs *mcp.ClientSession
+	assert.Eventually(t, func() bool {
+		var err error
+		cs, err = mcpClient.Connect(ctx, transport, nil)
+		return err == nil
+	}, 2*time.Second, 100*time.Millisecond, "Server should start within 2 seconds")
+	require.NotNil(t, cs)
+	defer cs.Close()
+
+	toolsResult, err := cs.ListTools(ctx, &mcp.ListToolsParams{})
+	require.NoError(t, err)
+
+	byName := make(map[string]*mcp.Tool, len(toolsResult.Tools))
+	for _, tool := range toolsResult.Tools {
+		byName[tool.Name] = tool
+	}
+
+	del := byName["deleteKubernetesResource"]
+	require.NotNil(t, del, "deleteKubernetesResource must be registered")
+	require.NotNil(t, del.Annotations)
+	assert.False(t, del.Annotations.ReadOnlyHint)
+	assert.Equal(t, ptr.To(true), del.Annotations.DestructiveHint, "delete must be advertised as destructive")
+	assert.False(t, del.Annotations.IdempotentHint)
+	assert.Equal(t, ptr.To(false), del.Annotations.OpenWorldHint)
+	assert.True(t, strings.HasPrefix(del.Description, "SECURITY: "), "delete description must open with the SECURITY block")
+	assert.Contains(t, del.Description, "confirmationToken")
+	assert.Contains(t, del.Description, "ALWAYS requires confirmation, even in auto-write mode")
+	assert.NotContains(t, del.Description, "Don't ask for confirmation")
+
+	plan := byName["deleteKubernetesResourcePlan"]
+	require.NotNil(t, plan, "deleteKubernetesResourcePlan must be registered")
+	require.NotNil(t, plan.Annotations)
+	assert.False(t, plan.Annotations.ReadOnlyHint)
+	assert.Nil(t, plan.Annotations.DestructiveHint, "the plan tool changes nothing and must not be marked destructive")
+	assert.True(t, strings.HasPrefix(plan.Description, "SECURITY: "), "plan description must open with the SECURITY block")
+	assert.Contains(t, plan.Description, "confirmationToken")
 }
