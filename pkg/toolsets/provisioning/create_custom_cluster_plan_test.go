@@ -2,15 +2,21 @@ package provisioning
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"testing"
+	"time"
 
 	"github.com/rancher/rancher-ai-mcp/pkg/client"
+	"github.com/rancher/rancher-ai-mcp/pkg/confirm"
+	"github.com/rancher/rancher-ai-mcp/pkg/toolconfig"
 
 	"github.com/modelcontextprotocol/go-sdk/mcp"
 	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
+	"go.uber.org/zap"
 	"k8s.io/client-go/dynamic"
 	dynamicfake "k8s.io/client-go/dynamic/fake"
 	"k8s.io/client-go/kubernetes"
@@ -189,7 +195,7 @@ func TestCreateCustomClusterPlan(t *testing.T) {
 			c.DynClientCreator = func(inConfig *rest.Config) (dynamic.Interface, error) {
 				return test.fakeDynClient, nil
 			}
-			tools := Tools{client: c}
+			tools := Tools{client: c, cfg: toolconfig.Config{Gate: fakeGates(t, nil)}}
 
 			result, _, err := tools.createCustomClusterPlan(context.Background(), &mcp.CallToolRequest{
 				Params: &mcp.CallToolParamsRaw{
@@ -205,13 +211,74 @@ func TestCreateCustomClusterPlan(t *testing.T) {
 				text, ok := result.Content[0].(*mcp.TextContent)
 				assert.Truef(t, ok, "expected type *mcp.TextContent")
 
-				assert.Truef(t, ok, "expected expectedResult to be a JSON string")
-				assert.JSONEq(t, createCustomClusterPlanOutput(test.params, test.finalK8sVersion), text.Text)
+				// The response now also carries the confirmation block; only the
+				// plan is compared here (the token is covered by
+				// TestCreateCustomClusterPlanToken).
+				assert.JSONEq(t, createCustomClusterPlanOutput(test.params, test.finalK8sVersion), planResponseWithoutConfirmation(t, text.Text))
 			}
 
 			svr.Close()
 		})
 	}
+}
+
+// TestCreateCustomClusterPlanToken exercises the plan-token round trip: the
+// token in the plan response must be accepted by the same gate for the exact
+// operation the execute tool will perform.
+func TestCreateCustomClusterPlanToken(t *testing.T) {
+	svr := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Write([]byte(createDummyKDMData("v1.32.4+rke2r1", "v1.32.3+rke2r1")))
+	}))
+	defer svr.Close()
+
+	c, err := client.NewClient(true, svr.URL)
+	if err != nil {
+		t.Fatalf("failed to create client: %v", err)
+	}
+	c.DynClientCreator = func(inConfig *rest.Config) (dynamic.Interface, error) {
+		return dynamicfake.NewSimpleDynamicClient(provisioningSchemes()), nil
+	}
+	gate := fakeGates(t, nil)
+	tools := Tools{client: c, cfg: toolconfig.Config{Gate: gate}}
+	req := &mcp.CallToolRequest{Params: &mcp.CallToolParamsRaw{Name: "createCustomClusterPlan"}}
+
+	params := createCustomClusterParams{Name: "test", Distribution: "rke2", CNI: "calico", Version: "v1.32.4+rke2r1"}
+
+	result, _, err := tools.createCustomClusterPlan(context.Background(), req, params)
+	require.NoError(t, err)
+
+	var parsed struct {
+		Plan         []map[string]any `json:"plan"`
+		Confirmation struct {
+			Token     string    `json:"confirmationToken"`
+			ExpiresAt time.Time `json:"expiresAt"`
+			Note      string    `json:"note"`
+		} `json:"confirmation"`
+	}
+	raw := result.Content[0].(*mcp.TextContent).Text
+	require.NoError(t, json.Unmarshal([]byte(raw), &parsed))
+	require.NotEmpty(t, parsed.Confirmation.Token, "plan response must carry a confirmationToken")
+	require.Len(t, parsed.Plan, 1)
+	assert.WithinDuration(t, time.Now().Add(gate.TokenTTL), parsed.Confirmation.ExpiresAt, time.Minute)
+
+	// The token binds the exact cluster object the execute tool submits.
+	obj, err := tools.CreateCustomClusterObj(req, params, zap.NewNop())
+	require.NoError(t, err)
+	payload, err := json.Marshal(obj.Object)
+	require.NoError(t, err)
+
+	err = gate.RequireToken(confirm.Operation{
+		Tool: "createCustomCluster", Cluster: LocalCluster, Namespace: DefaultClusterResourcesNamespace,
+		Kind: "cluster", Name: "test", Payload: payload,
+	}, parsed.Confirmation.Token)
+	require.NoError(t, err, "plan token must be accepted by the same gate for the exact operation")
+
+	// The token is single-use: a second validation of the same plan fails.
+	err = gate.RequireToken(confirm.Operation{
+		Tool: "createCustomCluster", Cluster: LocalCluster, Namespace: DefaultClusterResourcesNamespace,
+		Kind: "cluster", Name: "test", Payload: payload,
+	}, parsed.Confirmation.Token)
+	assert.ErrorIs(t, err, confirm.ErrTokenConsumed)
 }
 
 func createCustomClusterPlanOutput(params createCustomClusterParams, finalK8sVersion string) string {

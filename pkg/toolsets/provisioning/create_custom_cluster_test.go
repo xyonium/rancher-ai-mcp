@@ -8,9 +8,12 @@ import (
 	"testing"
 
 	"github.com/rancher/rancher-ai-mcp/pkg/client"
+	"github.com/rancher/rancher-ai-mcp/pkg/confirm"
+	"github.com/rancher/rancher-ai-mcp/pkg/toolconfig"
 
 	"github.com/modelcontextprotocol/go-sdk/mcp"
 	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 	"k8s.io/client-go/dynamic"
 	dynamicfake "k8s.io/client-go/dynamic/fake"
 	"k8s.io/client-go/kubernetes"
@@ -189,13 +192,23 @@ func TestCreateCustomCluster(t *testing.T) {
 			c.DynClientCreator = func(inConfig *rest.Config) (dynamic.Interface, error) {
 				return test.fakeDynClient, nil
 			}
-			tools := Tools{client: c}
-
-			result, _, err := tools.createCustomCluster(context.Background(), &mcp.CallToolRequest{
+			gate := fakeGates(t, approveElicit)
+			tools := Tools{client: c, cfg: toolconfig.Config{Gate: gate}}
+			req := &mcp.CallToolRequest{
 				Params: &mcp.CallToolParamsRaw{
 					Name: "createCustomCluster",
 				},
-			}, test.params)
+			}
+
+			params := test.params
+			// Validation-only cases fail before the gate is reached; the rest
+			// carry the single-use token minted by the plan tool for this exact
+			// operation.
+			if test.expectedError == "" {
+				params.ConfirmationToken = issueCustomClusterToken(t, &tools, gate, req, params)
+			}
+
+			result, _, err := tools.createCustomCluster(context.Background(), req, params)
 
 			if test.expectedError != "" {
 				assert.ErrorContains(t, err, test.expectedError)
@@ -212,6 +225,124 @@ func TestCreateCustomCluster(t *testing.T) {
 			svr.Close()
 		})
 	}
+}
+
+// TestCreateCustomClusterRequiresToken proves a create without a confirmation
+// token is rejected by the token gate and never reaches the cluster.
+func TestCreateCustomClusterRequiresToken(t *testing.T) {
+	svr := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Write([]byte(createDummyKDMData("v1.32.4+rke2r1")))
+	}))
+	defer svr.Close()
+
+	c, err := client.NewClient(true, svr.URL)
+	if err != nil {
+		t.Fatalf("failed to create client: %v", err)
+	}
+	dyn := dynamicfake.NewSimpleDynamicClient(provisioningSchemes())
+	c.DynClientCreator = func(inConfig *rest.Config) (dynamic.Interface, error) { return dyn, nil }
+	tools := Tools{client: c, cfg: toolconfig.Config{Gate: fakeGates(t, approveElicit)}}
+
+	_, _, err = tools.createCustomCluster(context.Background(), &mcp.CallToolRequest{
+		Params: &mcp.CallToolParamsRaw{Name: "createCustomCluster"},
+	}, createCustomClusterParams{
+		Name:         "test",
+		Distribution: "rke2",
+		CNI:          "calico",
+		Version:      "v1.32.4",
+	})
+	require.Error(t, err)
+	assert.ErrorIs(t, err, confirm.ErrTokenInvalid)
+	assert.Zero(t, countCreatesFake(dyn), "no create must reach the cluster without a token")
+}
+
+// TestCreateCustomClusterTokenMismatchRejected proves a token minted for one
+// cluster cannot be reused to create a different one.
+func TestCreateCustomClusterTokenMismatchRejected(t *testing.T) {
+	svr := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Write([]byte(createDummyKDMData("v1.32.4+rke2r1")))
+	}))
+	defer svr.Close()
+
+	c, err := client.NewClient(true, svr.URL)
+	if err != nil {
+		t.Fatalf("failed to create client: %v", err)
+	}
+	dyn := dynamicfake.NewSimpleDynamicClient(provisioningSchemes())
+	c.DynClientCreator = func(inConfig *rest.Config) (dynamic.Interface, error) { return dyn, nil }
+	gate := fakeGates(t, approveElicit)
+	tools := Tools{client: c, cfg: toolconfig.Config{Gate: gate}}
+	req := &mcp.CallToolRequest{Params: &mcp.CallToolParamsRaw{Name: "createCustomCluster"}}
+
+	approved := createCustomClusterParams{Name: "test", Distribution: "rke2", CNI: "calico", Version: "v1.32.4"}
+	token := issueCustomClusterToken(t, &tools, gate, req, approved)
+
+	tampered := approved
+	tampered.CNI = "cilium"
+	tampered.ConfirmationToken = token
+
+	_, _, err = tools.createCustomCluster(context.Background(), req, tampered)
+	require.Error(t, err)
+	assert.ErrorIs(t, err, confirm.ErrTokenMismatch)
+	assert.Zero(t, countCreatesFake(dyn), "a mismatching cluster must not reach the cluster")
+}
+
+// TestCreateCustomClusterDeclined proves a declined elicitation yields the
+// standard cancellation result and creates nothing.
+func TestCreateCustomClusterDeclined(t *testing.T) {
+	svr := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Write([]byte(createDummyKDMData("v1.32.4+rke2r1")))
+	}))
+	defer svr.Close()
+
+	c, err := client.NewClient(true, svr.URL)
+	if err != nil {
+		t.Fatalf("failed to create client: %v", err)
+	}
+	dyn := dynamicfake.NewSimpleDynamicClient(provisioningSchemes())
+	c.DynClientCreator = func(inConfig *rest.Config) (dynamic.Interface, error) { return dyn, nil }
+	gate := fakeGates(t, declineElicit)
+	tools := Tools{client: c, cfg: toolconfig.Config{Gate: gate}}
+	req := &mcp.CallToolRequest{Params: &mcp.CallToolParamsRaw{Name: "createCustomCluster"}}
+
+	params := createCustomClusterParams{Name: "test", Distribution: "rke2", CNI: "calico", Version: "v1.32.4"}
+	params.ConfirmationToken = issueCustomClusterToken(t, &tools, gate, req, params)
+
+	result, _, err := tools.createCustomCluster(context.Background(), req, params)
+	require.NoError(t, err)
+	require.Len(t, result.Content, 1)
+	assert.Equal(t, "Operation cancelled by the user. Nothing was executed.", result.Content[0].(*mcp.TextContent).Text)
+	assert.Zero(t, countCreatesFake(dyn), "declined create must not reach the cluster")
+}
+
+// TestCreateCustomClusterAutoWrite proves auto-write mode bypasses both the
+// token and the user confirmation.
+func TestCreateCustomClusterAutoWrite(t *testing.T) {
+	svr := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Write([]byte(createDummyKDMData("v1.32.4+rke2r1")))
+	}))
+	defer svr.Close()
+
+	c, err := client.NewClient(true, svr.URL)
+	if err != nil {
+		t.Fatalf("failed to create client: %v", err)
+	}
+	dyn := dynamicfake.NewSimpleDynamicClient(provisioningSchemes())
+	c.DynClientCreator = func(inConfig *rest.Config) (dynamic.Interface, error) { return dyn, nil }
+	// fakeGates(t, nil) makes elicitation a test failure if it is ever invoked.
+	tools := Tools{client: c, cfg: toolconfig.Config{Gate: fakeGates(t, nil), AutoWrite: true}}
+
+	result, _, err := tools.createCustomCluster(context.Background(), &mcp.CallToolRequest{
+		Params: &mcp.CallToolParamsRaw{Name: "createCustomCluster"},
+	}, createCustomClusterParams{
+		Name:         "test",
+		Distribution: "rke2",
+		CNI:          "calico",
+		Version:      "v1.32.4",
+	})
+	require.NoError(t, err)
+	require.NotEmpty(t, result.Content)
+	assert.Equal(t, 1, countCreatesFake(dyn), "auto-write create must be executed")
 }
 
 func createCustomClusterOutput(params createCustomClusterParams, finalK8sVersion string) string {

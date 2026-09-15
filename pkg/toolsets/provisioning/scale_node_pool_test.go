@@ -5,11 +5,14 @@ import (
 	"testing"
 
 	"github.com/rancher/rancher-ai-mcp/pkg/client"
+	"github.com/rancher/rancher-ai-mcp/pkg/confirm"
+	"github.com/rancher/rancher-ai-mcp/pkg/toolconfig"
 	"k8s.io/utils/ptr"
 
 	"github.com/modelcontextprotocol/go-sdk/mcp"
 	provisioningV1 "github.com/rancher/rancher/pkg/apis/provisioning.cattle.io/v1"
 	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 	"k8s.io/client-go/dynamic"
 	dynamicfake "k8s.io/client-go/dynamic/fake"
 	"k8s.io/client-go/kubernetes"
@@ -602,13 +605,23 @@ func TestScaleNodePool(t *testing.T) {
 					return test.fakeDynClient, nil
 				},
 			}
-			tools := Tools{client: c}
-
-			result, _, err := tools.scaleClusterNodePool(context.Background(), &mcp.CallToolRequest{
+			gate := fakeGates(t, approveElicit)
+			tools := Tools{client: c, cfg: toolconfig.Config{Gate: gate}}
+			req := &mcp.CallToolRequest{
 				Params: &mcp.CallToolParamsRaw{
 					Name: "scaleClusterNodePool",
 				},
-			}, test.params)
+			}
+
+			params := test.params
+			// The execute tool requires the single-use token minted by the plan
+			// tool for exactly this operation. Validation-only cases fail before
+			// the gate is reached, so they carry no token.
+			if test.expectedError == "" {
+				params.ConfirmationToken = issueScaleToken(t, &tools, gate, req, params)
+			}
+
+			result, _, err := tools.scaleClusterNodePool(context.Background(), req, params)
 
 			if test.expectedError != "" {
 				assert.ErrorContains(t, err, test.expectedError)
@@ -623,4 +636,127 @@ func TestScaleNodePool(t *testing.T) {
 			}
 		})
 	}
+}
+
+// TestScaleNodePoolRequiresToken proves a scale without a confirmation token is
+// rejected by the token gate and never patches the cluster.
+func TestScaleNodePoolRequiresToken(t *testing.T) {
+	dyn := dynamicfake.NewSimpleDynamicClientWithCustomListKinds(provisioningSchemes(), provisioningCustomListKinds(),
+		newProvisioningClusterWithRKEConfig("test-cluster", "fleet-default", "c-m-abc123", []provisioningV1.RKEMachinePool{
+			{
+				WorkerRole: true,
+				Name:       "test-nodepool",
+				Quantity:   ptr.To[int32](1),
+			},
+		}))
+	c := &client.Client{
+		ClientSetCreator: func(inConfig *rest.Config) (kubernetes.Interface, error) { return newFakeClientSet(), nil },
+		DynClientCreator: func(inConfig *rest.Config) (dynamic.Interface, error) { return dyn, nil },
+	}
+	tools := Tools{client: c, cfg: toolconfig.Config{Gate: fakeGates(t, approveElicit)}}
+
+	_, _, err := tools.scaleClusterNodePool(context.Background(), &mcp.CallToolRequest{
+		Params: &mcp.CallToolParamsRaw{Name: "scaleClusterNodePool"},
+	}, scaleNodePoolParameters{
+		Cluster:      "test-cluster",
+		Namespace:    "fleet-default",
+		NodePoolName: "test-nodepool",
+		DesiredSize:  3,
+	})
+	require.Error(t, err)
+	assert.ErrorIs(t, err, confirm.ErrTokenInvalid)
+	assert.Zero(t, countPatches(dyn), "no patch must reach the cluster without a token")
+}
+
+// TestScaleNodePoolTokenMismatchRejected proves a token minted for one patch
+// cannot be reused for a different patch on the same node pool.
+func TestScaleNodePoolTokenMismatchRejected(t *testing.T) {
+	dyn := dynamicfake.NewSimpleDynamicClientWithCustomListKinds(provisioningSchemes(), provisioningCustomListKinds(),
+		newProvisioningClusterWithRKEConfig("test-cluster", "fleet-default", "c-m-abc123", []provisioningV1.RKEMachinePool{
+			{
+				WorkerRole: true,
+				Name:       "test-nodepool",
+				Quantity:   ptr.To[int32](1),
+			},
+		}))
+	c := &client.Client{
+		ClientSetCreator: func(inConfig *rest.Config) (kubernetes.Interface, error) { return newFakeClientSet(), nil },
+		DynClientCreator: func(inConfig *rest.Config) (dynamic.Interface, error) { return dyn, nil },
+	}
+	gate := fakeGates(t, approveElicit)
+	tools := Tools{client: c, cfg: toolconfig.Config{Gate: gate}}
+	req := &mcp.CallToolRequest{Params: &mcp.CallToolParamsRaw{Name: "scaleClusterNodePool"}}
+
+	// The user approved scaling to 3; the agent then sends a different patch.
+	approved := scaleNodePoolParameters{Cluster: "test-cluster", Namespace: "fleet-default", NodePoolName: "test-nodepool", DesiredSize: 3}
+	token := issueScaleToken(t, &tools, gate, req, approved)
+
+	tampered := approved
+	tampered.DesiredSize = 5
+	tampered.ConfirmationToken = token
+
+	_, _, err := tools.scaleClusterNodePool(context.Background(), req, tampered)
+	require.Error(t, err)
+	assert.ErrorIs(t, err, confirm.ErrTokenMismatch)
+	assert.Zero(t, countPatches(dyn), "a mismatching patch must not reach the cluster")
+}
+
+// TestScaleNodePoolDeclined proves a declined elicitation yields the standard
+// cancellation result and patches nothing.
+func TestScaleNodePoolDeclined(t *testing.T) {
+	dyn := dynamicfake.NewSimpleDynamicClientWithCustomListKinds(provisioningSchemes(), provisioningCustomListKinds(),
+		newProvisioningClusterWithRKEConfig("test-cluster", "fleet-default", "c-m-abc123", []provisioningV1.RKEMachinePool{
+			{
+				WorkerRole: true,
+				Name:       "test-nodepool",
+				Quantity:   ptr.To[int32](1),
+			},
+		}))
+	c := &client.Client{
+		ClientSetCreator: func(inConfig *rest.Config) (kubernetes.Interface, error) { return newFakeClientSet(), nil },
+		DynClientCreator: func(inConfig *rest.Config) (dynamic.Interface, error) { return dyn, nil },
+	}
+	gate := fakeGates(t, declineElicit)
+	tools := Tools{client: c, cfg: toolconfig.Config{Gate: gate}}
+	req := &mcp.CallToolRequest{Params: &mcp.CallToolParamsRaw{Name: "scaleClusterNodePool"}}
+
+	params := scaleNodePoolParameters{Cluster: "test-cluster", Namespace: "fleet-default", NodePoolName: "test-nodepool", DesiredSize: 3}
+	params.ConfirmationToken = issueScaleToken(t, &tools, gate, req, params)
+
+	result, _, err := tools.scaleClusterNodePool(context.Background(), req, params)
+	require.NoError(t, err)
+	require.Len(t, result.Content, 1)
+	assert.Equal(t, "Operation cancelled by the user. Nothing was executed.", result.Content[0].(*mcp.TextContent).Text)
+	assert.Zero(t, countPatches(dyn), "declined scale must not reach the cluster")
+}
+
+// TestScaleNodePoolAutoWrite proves auto-write mode bypasses both the token and
+// the user confirmation.
+func TestScaleNodePoolAutoWrite(t *testing.T) {
+	dyn := dynamicfake.NewSimpleDynamicClientWithCustomListKinds(provisioningSchemes(), provisioningCustomListKinds(),
+		newProvisioningClusterWithRKEConfig("test-cluster", "fleet-default", "c-m-abc123", []provisioningV1.RKEMachinePool{
+			{
+				WorkerRole: true,
+				Name:       "test-nodepool",
+				Quantity:   ptr.To[int32](1),
+			},
+		}))
+	c := &client.Client{
+		ClientSetCreator: func(inConfig *rest.Config) (kubernetes.Interface, error) { return newFakeClientSet(), nil },
+		DynClientCreator: func(inConfig *rest.Config) (dynamic.Interface, error) { return dyn, nil },
+	}
+	// fakeGates(t, nil) makes elicitation a test failure if it is ever invoked.
+	tools := Tools{client: c, cfg: toolconfig.Config{Gate: fakeGates(t, nil), AutoWrite: true}}
+
+	result, _, err := tools.scaleClusterNodePool(context.Background(), &mcp.CallToolRequest{
+		Params: &mcp.CallToolParamsRaw{Name: "scaleClusterNodePool"},
+	}, scaleNodePoolParameters{
+		Cluster:      "test-cluster",
+		Namespace:    "fleet-default",
+		NodePoolName: "test-nodepool",
+		DesiredSize:  3,
+	})
+	require.NoError(t, err)
+	require.NotEmpty(t, result.Content)
+	assert.Equal(t, 1, countPatches(dyn), "auto-write scale must be executed")
 }

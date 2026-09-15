@@ -6,6 +6,8 @@ import (
 	"github.com/modelcontextprotocol/go-sdk/mcp"
 	"github.com/rancher/rancher-ai-mcp/internal/middleware"
 	"github.com/rancher/rancher-ai-mcp/pkg/client"
+	"github.com/rancher/rancher-ai-mcp/pkg/confirm"
+	"github.com/rancher/rancher-ai-mcp/pkg/toolconfig"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 	"k8s.io/apimachinery/pkg/runtime"
@@ -15,7 +17,6 @@ import (
 )
 
 func TestCreateK3kCluster(t *testing.T) {
-	fakeToken := "fakeToken"
 	scheme := runtime.NewScheme()
 
 	tests := map[string]struct {
@@ -132,9 +133,15 @@ func TestCreateK3kCluster(t *testing.T) {
 					return test.fakeDynClient, nil
 				},
 			}
-			tools := Tools{client: c}
+			gate := fakeGates(t, approveElicit)
+			tools := Tools{client: c, cfg: toolconfig.Config{Gate: gate}}
 
-			result, _, err := tools.createK3kCluster(middleware.WithToken(t.Context(), fakeToken), &mcp.CallToolRequest{}, test.params)
+			params := test.params
+			// The execute tool requires the single-use token minted by the plan
+			// tool for exactly this operation.
+			params.ConfirmationToken = issueK3kClusterToken(t, &tools, gate, params)
+
+			result, _, err := tools.createK3kCluster(middleware.WithToken(t.Context(), testToken), &mcp.CallToolRequest{}, params)
 
 			if test.expectedError != "" {
 				assert.ErrorContains(t, err, test.expectedError)
@@ -145,4 +152,82 @@ func TestCreateK3kCluster(t *testing.T) {
 			}
 		})
 	}
+}
+
+// TestCreateK3kClusterRequiresToken proves a create without a confirmation
+// token is rejected by the token gate and never reaches the cluster.
+func TestCreateK3kClusterRequiresToken(t *testing.T) {
+	dyn := dynamicfake.NewSimpleDynamicClientWithCustomListKinds(runtime.NewScheme(), k3kCustomListKinds(), newManagementCluster("downstream-1", true))
+	c := &client.Client{
+		DynClientCreator: func(inConfig *rest.Config) (dynamic.Interface, error) { return dyn, nil },
+	}
+	tools := Tools{client: c, cfg: toolconfig.Config{Gate: fakeGates(t, approveElicit)}}
+
+	_, _, err := tools.createK3kCluster(middleware.WithToken(t.Context(), testToken), &mcp.CallToolRequest{}, createK3kClusterParams{
+		Name:          "min-cluster",
+		Namespace:     "default",
+		TargetCluster: "downstream-1",
+	})
+	require.Error(t, err)
+	assert.ErrorIs(t, err, confirm.ErrTokenInvalid)
+	assert.Zero(t, countCreatesFake(dyn), "no create must reach the cluster without a token")
+}
+
+// TestCreateK3kClusterTokenMismatchRejected proves a token minted for one K3k
+// cluster cannot be reused to create a different one.
+func TestCreateK3kClusterTokenMismatchRejected(t *testing.T) {
+	dyn := dynamicfake.NewSimpleDynamicClientWithCustomListKinds(runtime.NewScheme(), k3kCustomListKinds(), newManagementCluster("downstream-1", true))
+	c := &client.Client{
+		DynClientCreator: func(inConfig *rest.Config) (dynamic.Interface, error) { return dyn, nil },
+	}
+	gate := fakeGates(t, approveElicit)
+	tools := Tools{client: c, cfg: toolconfig.Config{Gate: gate}}
+
+	tampered := createK3kClusterParams{Name: "other-cluster", Namespace: "default", TargetCluster: "downstream-1"}
+	tampered.ConfirmationToken = issueK3kClusterToken(t, &tools, gate, createK3kClusterParams{Name: "min-cluster", Namespace: "default", TargetCluster: "downstream-1"})
+
+	_, _, err := tools.createK3kCluster(middleware.WithToken(t.Context(), testToken), &mcp.CallToolRequest{}, tampered)
+	require.Error(t, err)
+	assert.ErrorIs(t, err, confirm.ErrTokenMismatch)
+	assert.Zero(t, countCreatesFake(dyn), "a mismatching cluster must not reach the cluster")
+}
+
+// TestCreateK3kClusterDeclined proves a declined elicitation yields the standard
+// cancellation result and creates nothing.
+func TestCreateK3kClusterDeclined(t *testing.T) {
+	dyn := dynamicfake.NewSimpleDynamicClientWithCustomListKinds(runtime.NewScheme(), k3kCustomListKinds(), newManagementCluster("downstream-1", true))
+	c := &client.Client{
+		DynClientCreator: func(inConfig *rest.Config) (dynamic.Interface, error) { return dyn, nil },
+	}
+	gate := fakeGates(t, declineElicit)
+	tools := Tools{client: c, cfg: toolconfig.Config{Gate: gate}}
+
+	params := createK3kClusterParams{Name: "min-cluster", Namespace: "default", TargetCluster: "downstream-1"}
+	params.ConfirmationToken = issueK3kClusterToken(t, &tools, gate, params)
+
+	result, _, err := tools.createK3kCluster(middleware.WithToken(t.Context(), testToken), &mcp.CallToolRequest{}, params)
+	require.NoError(t, err)
+	require.Len(t, result.Content, 1)
+	assert.Equal(t, "Operation cancelled by the user. Nothing was executed.", result.Content[0].(*mcp.TextContent).Text)
+	assert.Zero(t, countCreatesFake(dyn), "declined create must not reach the cluster")
+}
+
+// TestCreateK3kClusterAutoWrite proves auto-write mode bypasses both the token
+// and the user confirmation.
+func TestCreateK3kClusterAutoWrite(t *testing.T) {
+	dyn := dynamicfake.NewSimpleDynamicClientWithCustomListKinds(runtime.NewScheme(), k3kCustomListKinds(), newManagementCluster("downstream-1", true))
+	c := &client.Client{
+		DynClientCreator: func(inConfig *rest.Config) (dynamic.Interface, error) { return dyn, nil },
+	}
+	// fakeGates(t, nil) makes elicitation a test failure if it is ever invoked.
+	tools := Tools{client: c, cfg: toolconfig.Config{Gate: fakeGates(t, nil), AutoWrite: true}}
+
+	result, _, err := tools.createK3kCluster(middleware.WithToken(t.Context(), testToken), &mcp.CallToolRequest{}, createK3kClusterParams{
+		Name:          "min-cluster",
+		Namespace:     "default",
+		TargetCluster: "downstream-1",
+	})
+	require.NoError(t, err)
+	require.NotEmpty(t, result.Content)
+	assert.Equal(t, 1, countCreatesFake(dyn), "auto-write create must be executed")
 }

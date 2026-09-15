@@ -2,14 +2,20 @@ package provisioning
 
 import (
 	"context"
+	"encoding/json"
 	"testing"
+	"time"
 
 	"github.com/rancher/rancher-ai-mcp/pkg/client"
+	"github.com/rancher/rancher-ai-mcp/pkg/confirm"
+	"github.com/rancher/rancher-ai-mcp/pkg/toolconfig"
+	"go.uber.org/zap"
 	"k8s.io/utils/ptr"
 
 	"github.com/modelcontextprotocol/go-sdk/mcp"
 	provisioningV1 "github.com/rancher/rancher/pkg/apis/provisioning.cattle.io/v1"
 	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 	"k8s.io/client-go/dynamic"
 	dynamicfake "k8s.io/client-go/dynamic/fake"
 	"k8s.io/client-go/kubernetes"
@@ -504,7 +510,7 @@ func TestScaleNodePoolPlan(t *testing.T) {
 					return test.fakeDynClient, nil
 				},
 			}
-			tools := Tools{client: c}
+			tools := Tools{client: c, cfg: toolconfig.Config{Gate: fakeGates(t, nil)}}
 
 			result, _, err := tools.scaleClusterNodePoolPlan(context.Background(), &mcp.CallToolRequest{
 				Params: &mcp.CallToolParamsRaw{
@@ -520,9 +526,69 @@ func TestScaleNodePoolPlan(t *testing.T) {
 				text, ok := result.Content[0].(*mcp.TextContent)
 				assert.Truef(t, ok, "expected type *mcp.TextContent")
 
-				assert.Truef(t, ok, "expected expectedResult to be a JSON string")
-				assert.JSONEq(t, test.expectedResult, text.Text)
+				// The response now also carries the confirmation block; only the
+				// plan is compared here (the token is covered by
+				// TestScaleNodePoolPlanToken).
+				assert.JSONEq(t, test.expectedResult, planResponseWithoutConfirmation(t, text.Text))
 			}
 		})
 	}
+}
+
+// TestScaleNodePoolPlanToken exercises the plan-token round trip: the token in
+// the plan response must be accepted by the same gate for the exact patch the
+// execute tool will send. The plan key keeps its existing shape; the
+// confirmation block is additive.
+func TestScaleNodePoolPlanToken(t *testing.T) {
+	gate := fakeGates(t, nil)
+	dyn := dynamicfake.NewSimpleDynamicClientWithCustomListKinds(provisioningSchemes(), provisioningCustomListKinds(),
+		newProvisioningClusterWithRKEConfig("test-cluster", "fleet-default", "c-m-abc123", []provisioningV1.RKEMachinePool{
+			{
+				WorkerRole: true,
+				Name:       "test-nodepool",
+				Quantity:   ptr.To[int32](1),
+			},
+		}))
+	c := &client.Client{
+		ClientSetCreator: func(inConfig *rest.Config) (kubernetes.Interface, error) { return newFakeClientSet(), nil },
+		DynClientCreator: func(inConfig *rest.Config) (dynamic.Interface, error) { return dyn, nil },
+	}
+	tools := Tools{client: c, cfg: toolconfig.Config{Gate: gate}}
+	req := &mcp.CallToolRequest{Params: &mcp.CallToolParamsRaw{Name: "scaleClusterNodePoolPlan"}}
+
+	params := scaleNodePoolParameters{Cluster: "test-cluster", Namespace: "fleet-default", NodePoolName: "test-nodepool", DesiredSize: 3}
+
+	result, _, err := tools.scaleClusterNodePoolPlan(context.Background(), req, params)
+	require.NoError(t, err)
+
+	var parsed struct {
+		Plan         []map[string]any `json:"plan"`
+		Confirmation struct {
+			Token     string    `json:"confirmationToken"`
+			ExpiresAt time.Time `json:"expiresAt"`
+			Note      string    `json:"note"`
+		} `json:"confirmation"`
+	}
+	raw := result.Content[0].(*mcp.TextContent).Text
+	require.NoError(t, json.Unmarshal([]byte(raw), &parsed))
+	require.NotEmpty(t, parsed.Confirmation.Token, "plan response must carry a confirmationToken")
+	require.Len(t, parsed.Plan, 1)
+	assert.WithinDuration(t, time.Now().Add(gate.TokenTTL), parsed.Confirmation.ExpiresAt, time.Minute)
+
+	// The token binds the exact patch bytes the execute tool sends.
+	patchBytes, err := tools.scaleClusterNodePoolPatch(context.Background(), req, params, zap.NewNop())
+	require.NoError(t, err)
+
+	err = gate.RequireToken(confirm.Operation{
+		Tool: "scaleClusterNodePool", Cluster: "test-cluster", Namespace: "fleet-default",
+		Kind: "nodepool", Name: "test-nodepool", Payload: patchBytes,
+	}, parsed.Confirmation.Token)
+	require.NoError(t, err, "plan token must be accepted by the same gate for the exact operation")
+
+	// The token is single-use: a second validation of the same plan fails.
+	err = gate.RequireToken(confirm.Operation{
+		Tool: "scaleClusterNodePool", Cluster: "test-cluster", Namespace: "fleet-default",
+		Kind: "nodepool", Name: "test-nodepool", Payload: patchBytes,
+	}, parsed.Confirmation.Token)
+	assert.ErrorIs(t, err, confirm.ErrTokenConsumed)
 }

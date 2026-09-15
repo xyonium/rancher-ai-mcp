@@ -1,9 +1,15 @@
 package provisioning
 
 import (
+	"context"
 	"encoding/json"
+	"errors"
+	"testing"
 
+	"github.com/modelcontextprotocol/go-sdk/mcp"
+	"github.com/rancher/rancher-ai-mcp/pkg/confirm"
 	provisioningV1 "github.com/rancher/rancher/pkg/apis/provisioning.cattle.io/v1"
+	"go.uber.org/zap"
 	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
@@ -11,6 +17,7 @@ import (
 	"k8s.io/apimachinery/pkg/runtime/schema"
 	"k8s.io/client-go/discovery"
 	fakediscovery "k8s.io/client-go/discovery/fake"
+	dynamicfake "k8s.io/client-go/dynamic/fake"
 	"k8s.io/client-go/kubernetes"
 	"k8s.io/client-go/kubernetes/fake"
 )
@@ -379,6 +386,157 @@ func newK3kCluster(name string, mode string, version string, servers int, agents
 			},
 		},
 	}
+}
+
+// fakeGates returns a real confirmation gate whose elicitation is replaced by
+// the given function. A nil fn installs one that fails the test if called.
+func fakeGates(t *testing.T, fn func(ctx context.Context, ss *mcp.ServerSession, params *mcp.ElicitParams) (*mcp.ElicitResult, error)) *confirm.Gate {
+	t.Helper()
+	gate, err := confirm.NewGate()
+	if err != nil {
+		t.Fatalf("failed to create gate: %v", err)
+	}
+	if fn == nil {
+		fn = func(context.Context, *mcp.ServerSession, *mcp.ElicitParams) (*mcp.ElicitResult, error) {
+			t.Error("elicitation must not be called")
+			return nil, errors.New("unexpected elicitation")
+		}
+	}
+	gate.ElicitFunc = fn
+	return gate
+}
+
+// approveElicit accepts the confirmation form with "approve".
+func approveElicit(context.Context, *mcp.ServerSession, *mcp.ElicitParams) (*mcp.ElicitResult, error) {
+	return &mcp.ElicitResult{Action: "accept", Content: map[string]any{"confirm": "approve"}}, nil
+}
+
+// declineElicit rejects the confirmation form.
+func declineElicit(context.Context, *mcp.ServerSession, *mcp.ElicitParams) (*mcp.ElicitResult, error) {
+	return &mcp.ElicitResult{Action: "decline"}, nil
+}
+
+// countPatches returns how many patch actions the fake dynamic client recorded.
+func countPatches(dyn *dynamicfake.FakeDynamicClient) int {
+	n := 0
+	for _, action := range dyn.Actions() {
+		if action.GetVerb() == "patch" {
+			n++
+		}
+	}
+	return n
+}
+
+// countCreatesFake returns how many create actions the fake dynamic client recorded.
+func countCreatesFake(dyn *dynamicfake.FakeDynamicClient) int {
+	n := 0
+	for _, action := range dyn.Actions() {
+		if action.GetVerb() == "create" {
+			n++
+		}
+	}
+	return n
+}
+
+// issueScaleToken mints the confirmation token the plan tool would have issued
+// for the given scale parameters, by computing the same patch bytes.
+func issueScaleToken(t *testing.T, tools *Tools, gate *confirm.Gate, toolReq *mcp.CallToolRequest, params scaleNodePoolParameters) string {
+	t.Helper()
+	if params.Namespace == "" || params.Namespace == "default" {
+		params.Namespace = DefaultClusterResourcesNamespace
+	}
+	patchBytes, err := tools.scaleClusterNodePoolPatch(context.Background(), toolReq, params, zap.NewNop())
+	if err != nil {
+		t.Fatalf("failed to compute scale patch: %v", err)
+	}
+	token, err := gate.IssueToken(confirm.Operation{
+		Tool: "scaleClusterNodePool", Cluster: params.Cluster, Namespace: params.Namespace,
+		Kind: "nodepool", Name: params.NodePoolName, Payload: patchBytes,
+	})
+	if err != nil {
+		t.Fatalf("failed to issue token: %v", err)
+	}
+	return token
+}
+
+// issueK3kClusterToken mints the confirmation token the plan tool would have
+// issued for the given K3k cluster parameters.
+func issueK3kClusterToken(t *testing.T, tools *Tools, gate *confirm.Gate, params createK3kClusterParams) string {
+	t.Helper()
+	obj := tools.createK3kClusterObj(params)
+	payload, err := json.Marshal(obj.Object)
+	if err != nil {
+		t.Fatalf("failed to marshal object: %v", err)
+	}
+	token, err := gate.IssueToken(confirm.Operation{
+		Tool: "createK3kCluster", Cluster: params.TargetCluster, Namespace: params.Namespace,
+		Kind: "cluster", Name: params.Name, Payload: payload,
+	})
+	if err != nil {
+		t.Fatalf("failed to issue token: %v", err)
+	}
+	return token
+}
+
+// issueImportedClusterToken mints the confirmation token the plan tool would
+// have issued for the given imported cluster parameters: the same JSON the
+// execute tool submits to the Rancher API.
+func issueImportedClusterToken(t *testing.T, tools *Tools, gate *confirm.Gate, params createImportedClusterParams) string {
+	t.Helper()
+	cluster, err := tools.createImportedClusterObj(params)
+	if err != nil {
+		t.Fatalf("failed to build cluster object: %v", err)
+	}
+	payload, err := cluster.MarshalJSON()
+	if err != nil {
+		t.Fatalf("failed to marshal cluster object: %v", err)
+	}
+	token, err := gate.IssueToken(confirm.Operation{
+		Tool: "createImportedCluster", Cluster: LocalCluster, Kind: "cluster", Name: params.Name, Payload: payload,
+	})
+	if err != nil {
+		t.Fatalf("failed to issue token: %v", err)
+	}
+	return token
+}
+
+// issueCustomClusterToken mints the confirmation token the plan tool would have
+// issued for the given custom cluster parameters.
+func issueCustomClusterToken(t *testing.T, tools *Tools, gate *confirm.Gate, toolReq *mcp.CallToolRequest, params createCustomClusterParams) string {
+	t.Helper()
+	obj, err := tools.CreateCustomClusterObj(toolReq, params, zap.NewNop())
+	if err != nil {
+		t.Fatalf("failed to build custom cluster object: %v", err)
+	}
+	payload, err := json.Marshal(obj.Object)
+	if err != nil {
+		t.Fatalf("failed to marshal custom cluster object: %v", err)
+	}
+	token, err := gate.IssueToken(confirm.Operation{
+		Tool: "createCustomCluster", Cluster: LocalCluster, Namespace: DefaultClusterResourcesNamespace,
+		Kind: "cluster", Name: params.Name, Payload: payload,
+	})
+	if err != nil {
+		t.Fatalf("failed to issue token: %v", err)
+	}
+	return token
+}
+
+// planResponseWithoutConfirmation strips the additive confirmation block from a
+// plan response so tests can keep asserting the pre-existing {"plan": ...}
+// shape.
+func planResponseWithoutConfirmation(t *testing.T, response string) string {
+	t.Helper()
+	var parsed map[string]any
+	if err := json.Unmarshal([]byte(response), &parsed); err != nil {
+		t.Fatalf("failed to parse plan response: %v", err)
+	}
+	delete(parsed, "confirmation")
+	stripped, err := json.Marshal(parsed)
+	if err != nil {
+		t.Fatalf("failed to marshal plan response: %v", err)
+	}
+	return string(stripped)
 }
 
 func createDummyKDMData(versions ...string) string {

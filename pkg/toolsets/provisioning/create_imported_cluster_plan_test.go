@@ -4,9 +4,12 @@ import (
 	"context"
 	"encoding/json"
 	"testing"
+	"time"
 
 	"github.com/modelcontextprotocol/go-sdk/mcp"
 	"github.com/rancher/rancher-ai-mcp/pkg/client"
+	"github.com/rancher/rancher-ai-mcp/pkg/confirm"
+	"github.com/rancher/rancher-ai-mcp/pkg/toolconfig"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 	"k8s.io/client-go/dynamic"
@@ -184,7 +187,7 @@ func TestCreateImportedClusterPlan(t *testing.T) {
 					return test.fakeDynClient, nil
 				},
 			}
-			tools := Tools{client: c}
+			tools := Tools{client: c, cfg: toolconfig.Config{Gate: fakeGates(t, nil)}}
 
 			result, _, err := tools.createImportedClusterPlan(context.Background(), &mcp.CallToolRequest{
 				Params: &mcp.CallToolParamsRaw{
@@ -216,4 +219,49 @@ func TestCreateImportedClusterPlan(t *testing.T) {
 			}
 		})
 	}
+}
+
+// TestCreateImportedClusterPlanToken exercises the plan-token round trip: the
+// token in the plan response must be accepted by the same gate for the exact
+// object the execute tool will submit.
+func TestCreateImportedClusterPlanToken(t *testing.T) {
+	gate := fakeGates(t, nil)
+	tools := Tools{cfg: toolconfig.Config{Gate: gate}}
+	req := &mcp.CallToolRequest{Params: &mcp.CallToolParamsRaw{Name: "createImportedClusterPlan"}}
+
+	params := createImportedClusterParams{Name: "test-cluster", Description: "A test cluster"}
+
+	result, _, err := tools.createImportedClusterPlan(context.Background(), req, params)
+	require.NoError(t, err)
+
+	var parsed struct {
+		Plan         []map[string]any `json:"plan"`
+		Confirmation struct {
+			Token     string    `json:"confirmationToken"`
+			ExpiresAt time.Time `json:"expiresAt"`
+			Note      string    `json:"note"`
+		} `json:"confirmation"`
+	}
+	raw := result.Content[0].(*mcp.TextContent).Text
+	require.NoError(t, json.Unmarshal([]byte(raw), &parsed))
+	require.NotEmpty(t, parsed.Confirmation.Token, "plan response must carry a confirmationToken")
+	require.Len(t, parsed.Plan, 1)
+	assert.WithinDuration(t, time.Now().Add(gate.TokenTTL), parsed.Confirmation.ExpiresAt, time.Minute)
+
+	// The token binds the exact object the execute tool submits to the API.
+	cluster, err := tools.createImportedClusterObj(params)
+	require.NoError(t, err)
+	payload, err := cluster.MarshalJSON()
+	require.NoError(t, err)
+
+	err = gate.RequireToken(confirm.Operation{
+		Tool: "createImportedCluster", Cluster: LocalCluster, Kind: "cluster", Name: "test-cluster", Payload: payload,
+	}, parsed.Confirmation.Token)
+	require.NoError(t, err, "plan token must be accepted by the same gate for the exact operation")
+
+	// The token is single-use: a second validation of the same plan fails.
+	err = gate.RequireToken(confirm.Operation{
+		Tool: "createImportedCluster", Cluster: LocalCluster, Kind: "cluster", Name: "test-cluster", Payload: payload,
+	}, parsed.Confirmation.Token)
+	assert.ErrorIs(t, err, confirm.ErrTokenConsumed)
 }

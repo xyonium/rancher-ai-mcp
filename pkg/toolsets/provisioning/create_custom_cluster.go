@@ -16,6 +16,7 @@ import (
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 
 	"github.com/modelcontextprotocol/go-sdk/mcp"
+	"github.com/rancher/rancher-ai-mcp/pkg/confirm"
 	provisioningV1 "github.com/rancher/rancher/pkg/apis/provisioning.cattle.io/v1"
 	v1 "github.com/rancher/rancher/pkg/apis/rke.cattle.io/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
@@ -27,8 +28,13 @@ type createCustomClusterParams struct {
 	CNI          string `json:"CNI" jsonschema:"the CNI (Container Networking Interface) to use"`
 	Version      string `json:"version" jsonschema:"the rke2 or k3s version that will be used for the cluster"`
 	Distribution string `json:"distribution" jsonschema:"the distribution of the cluster, either rke2 or k3s"`
+
+	ConfirmationToken string `json:"confirmationToken,omitempty" jsonschema:"REQUIRED (unless the server runs in auto-write mode): the single-use confirmationToken returned by createCustomClusterPlan for THIS exact operation. Never invent, reuse, or guess a token"`
 }
 
+// createCustomCluster creates a custom cluster. The execution is gated behind a
+// single-use plan token plus a direct user confirmation, and the user approves
+// the exact cluster object submitted.
 func (t *Tools) createCustomCluster(ctx context.Context, toolReq *mcp.CallToolRequest, params createCustomClusterParams) (*mcp.CallToolResult, any, error) {
 	log := utils.NewChildLogger(toolReq, map[string]string{
 		"Name":         params.Name,
@@ -44,6 +50,25 @@ func (t *Tools) createCustomCluster(ctx context.Context, toolReq *mcp.CallToolRe
 	if err != nil {
 		log.Error("failed to create custom cluster object", zap.Error(err))
 		return nil, nil, fmt.Errorf("failed to create custom cluster object: %w", err)
+	}
+
+	// The token binds the exact cluster object being created: marshal it once, so
+	// the bytes shown to the user and hashed into the token come from the same
+	// canonicalization.
+	payloadBytes, err := json.Marshal(unstructuredObj.Object)
+	if err != nil {
+		log.Error("failed to marshal custom cluster object", zap.Error(err))
+		return nil, nil, fmt.Errorf("failed to marshal custom cluster object: %w", err)
+	}
+
+	op := confirm.Operation{Tool: "createCustomCluster", Cluster: LocalCluster, Namespace: DefaultClusterResourcesNamespace, Kind: "cluster", Name: params.Name, Payload: payloadBytes}
+	summary := fmt.Sprintf("CREATE custom cluster %s in namespace %q of cluster %q with the following object:\n%s", params.Name, DefaultClusterResourcesNamespace, LocalCluster, payloadBytes)
+	approved, err := t.cfg.Gate.Check(ctx, toolReq.Session, op, params.ConfirmationToken, summary, "", t.cfg.AutoWrite)
+	if err != nil {
+		return nil, nil, err
+	}
+	if !approved {
+		return confirm.CancelledResult(), nil, nil
 	}
 
 	resourceInterface, err := t.client.GetResourceInterface(ctx, middleware.Token(ctx), DefaultClusterResourcesNamespace, LocalCluster, converter.K8sKindsToGVRs[converter.ProvisioningClusterResourceKind])

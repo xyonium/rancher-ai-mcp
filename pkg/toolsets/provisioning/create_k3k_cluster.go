@@ -2,10 +2,12 @@ package provisioning
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 
 	"github.com/modelcontextprotocol/go-sdk/mcp"
 	"github.com/rancher/rancher-ai-mcp/internal/middleware"
+	"github.com/rancher/rancher-ai-mcp/pkg/confirm"
 	"github.com/rancher/rancher-ai-mcp/pkg/converter"
 	"github.com/rancher/rancher-ai-mcp/pkg/response"
 	"go.uber.org/zap"
@@ -41,6 +43,8 @@ type createK3kClusterParams struct {
 	ServerLimit   ResourceLimits    `json:"serverLimit,omitempty" jsonschema:"resource constraints for server nodes (contains cpu and memory strings)"`
 	WorkerLimit   ResourceLimits    `json:"workerLimit,omitempty" jsonschema:"resource constraints for worker nodes (contains cpu and memory strings)"`
 	Persistence   PersistenceConfig `json:"persistence,omitempty" jsonschema:"storage settings for etcd data (contains type, storageClassName, storageRequest strings)"`
+
+	ConfirmationToken string `json:"confirmationToken,omitempty" jsonschema:"REQUIRED (unless the server runs in auto-write mode): the single-use confirmationToken returned by createK3kClusterPlan for THIS exact operation. Never invent, reuse, or guess a token"`
 }
 
 // createK3kClusterObj builds the unstructured K3k Cluster object from the given parameters.
@@ -133,10 +137,31 @@ func (t *Tools) createK3kClusterObj(params createK3kClusterParams) *unstructured
 }
 
 // createK3kCluster creates a new K3k cluster using structured input parameters.
+// The execution is gated behind a single-use plan token plus a direct user
+// confirmation, and the user approves the exact cluster object submitted.
 func (t *Tools) createK3kCluster(ctx context.Context, toolReq *mcp.CallToolRequest, params createK3kClusterParams) (*mcp.CallToolResult, any, error) {
 	zap.L().Debug("createK3kCluster called")
 
 	unstructuredObj := t.createK3kClusterObj(params)
+
+	// The token binds the exact cluster object being created: marshal it once, so
+	// the bytes shown to the user and hashed into the token come from the same
+	// canonicalization.
+	payloadBytes, err := json.Marshal(unstructuredObj.Object)
+	if err != nil {
+		zap.L().Error("failed to marshal K3k cluster object", zap.String("tool", "createK3kCluster"), zap.Error(err))
+		return nil, nil, fmt.Errorf("failed to marshal K3k cluster object: %w", err)
+	}
+
+	op := confirm.Operation{Tool: "createK3kCluster", Cluster: params.TargetCluster, Namespace: params.Namespace, Kind: "cluster", Name: params.Name, Payload: payloadBytes}
+	summary := fmt.Sprintf("CREATE K3k cluster %s in namespace %q of cluster %q with the following object:\n%s", params.Name, params.Namespace, params.TargetCluster, payloadBytes)
+	approved, err := t.cfg.Gate.Check(ctx, toolReq.Session, op, params.ConfirmationToken, summary, "", t.cfg.AutoWrite)
+	if err != nil {
+		return nil, nil, err
+	}
+	if !approved {
+		return confirm.CancelledResult(), nil, nil
+	}
 
 	resourceInterface, err := t.client.GetResourceInterface(ctx, middleware.Token(ctx), params.Namespace, params.TargetCluster, converter.K8sKindsToGVRs["k3kcluster"])
 	if err != nil {

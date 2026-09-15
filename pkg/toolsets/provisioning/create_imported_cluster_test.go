@@ -7,6 +7,8 @@ import (
 	"testing"
 
 	"github.com/rancher/rancher-ai-mcp/pkg/client"
+	"github.com/rancher/rancher-ai-mcp/pkg/confirm"
+	"github.com/rancher/rancher-ai-mcp/pkg/toolconfig"
 
 	"github.com/modelcontextprotocol/go-sdk/mcp"
 	"github.com/stretchr/testify/assert"
@@ -117,13 +119,22 @@ func TestCreateImportedCluster(t *testing.T) {
 			c.DynClientCreator = func(inConfig *rest.Config) (dynamic.Interface, error) {
 				return dynamicfake.NewSimpleDynamicClient(provisioningSchemes()), nil
 			}
-			tools := Tools{client: c}
+			gate := fakeGates(t, approveElicit)
+			tools := Tools{client: c, cfg: toolconfig.Config{Gate: gate}}
+
+			params := test.params
+			// Validation-only cases fail before the gate is reached; the rest
+			// carry the single-use token minted by the plan tool for this exact
+			// operation.
+			if test.params.Name != "" {
+				params.ConfirmationToken = issueImportedClusterToken(t, &tools, gate, params)
+			}
 
 			result, _, err := tools.createImportedCluster(context.Background(), &mcp.CallToolRequest{
 				Params: &mcp.CallToolParamsRaw{
 					Name: "createImportedCluster",
 				},
-			}, test.params)
+			}, params)
 
 			if test.expectedError != "" {
 				assert.ErrorContains(t, err, test.expectedError)
@@ -137,6 +148,116 @@ func TestCreateImportedCluster(t *testing.T) {
 			}
 		})
 	}
+}
+
+// TestCreateImportedClusterRequiresToken proves a create without a confirmation
+// token is rejected by the token gate and never calls the Rancher API.
+func TestCreateImportedClusterRequiresToken(t *testing.T) {
+	requests := 0
+	svr := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		requests++
+		w.WriteHeader(http.StatusCreated)
+		w.Write([]byte(`{}`))
+	}))
+	defer svr.Close()
+
+	c, err := client.NewClient(true, svr.URL)
+	if err != nil {
+		t.Fatalf("failed to create client: %v", err)
+	}
+	tools := Tools{client: c, cfg: toolconfig.Config{Gate: fakeGates(t, approveElicit)}}
+
+	_, _, err = tools.createImportedCluster(context.Background(), &mcp.CallToolRequest{
+		Params: &mcp.CallToolParamsRaw{Name: "createImportedCluster"},
+	}, createImportedClusterParams{Name: "test-cluster"})
+	require.Error(t, err)
+	assert.ErrorIs(t, err, confirm.ErrTokenInvalid)
+	assert.Zero(t, requests, "no API request must be made without a token")
+}
+
+// TestCreateImportedClusterTokenMismatchRejected proves a token minted for one
+// cluster cannot be reused to create a different cluster.
+func TestCreateImportedClusterTokenMismatchRejected(t *testing.T) {
+	requests := 0
+	svr := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		requests++
+		w.WriteHeader(http.StatusCreated)
+		w.Write([]byte(`{}`))
+	}))
+	defer svr.Close()
+
+	c, err := client.NewClient(true, svr.URL)
+	if err != nil {
+		t.Fatalf("failed to create client: %v", err)
+	}
+	gate := fakeGates(t, approveElicit)
+	tools := Tools{client: c, cfg: toolconfig.Config{Gate: gate}}
+
+	tampered := createImportedClusterParams{Name: "other-cluster"}
+	tampered.ConfirmationToken = issueImportedClusterToken(t, &tools, gate, createImportedClusterParams{Name: "test-cluster"})
+
+	_, _, err = tools.createImportedCluster(context.Background(), &mcp.CallToolRequest{
+		Params: &mcp.CallToolParamsRaw{Name: "createImportedCluster"},
+	}, tampered)
+	require.Error(t, err)
+	assert.ErrorIs(t, err, confirm.ErrTokenMismatch)
+	assert.Zero(t, requests, "a mismatching cluster must not be submitted")
+}
+
+// TestCreateImportedClusterDeclined proves a declined elicitation yields the
+// standard cancellation result and creates nothing.
+func TestCreateImportedClusterDeclined(t *testing.T) {
+	requests := 0
+	svr := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		requests++
+		w.WriteHeader(http.StatusCreated)
+		w.Write([]byte(`{}`))
+	}))
+	defer svr.Close()
+
+	c, err := client.NewClient(true, svr.URL)
+	if err != nil {
+		t.Fatalf("failed to create client: %v", err)
+	}
+	gate := fakeGates(t, declineElicit)
+	tools := Tools{client: c, cfg: toolconfig.Config{Gate: gate}}
+
+	params := createImportedClusterParams{Name: "test-cluster"}
+	params.ConfirmationToken = issueImportedClusterToken(t, &tools, gate, params)
+
+	result, _, err := tools.createImportedCluster(context.Background(), &mcp.CallToolRequest{
+		Params: &mcp.CallToolParamsRaw{Name: "createImportedCluster"},
+	}, params)
+	require.NoError(t, err)
+	require.Len(t, result.Content, 1)
+	assert.Equal(t, "Operation cancelled by the user. Nothing was executed.", result.Content[0].(*mcp.TextContent).Text)
+	assert.Zero(t, requests, "declined create must not call the Rancher API")
+}
+
+// TestCreateImportedClusterAutoWrite proves auto-write mode bypasses both the
+// token and the user confirmation.
+func TestCreateImportedClusterAutoWrite(t *testing.T) {
+	requests := 0
+	svr := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		requests++
+		w.WriteHeader(http.StatusCreated)
+		w.Write([]byte(`{"type": "cluster", "name": "test-cluster"}`))
+	}))
+	defer svr.Close()
+
+	c, err := client.NewClient(true, svr.URL)
+	if err != nil {
+		t.Fatalf("failed to create client: %v", err)
+	}
+	// fakeGates(t, nil) makes elicitation a test failure if it is ever invoked.
+	tools := Tools{client: c, cfg: toolconfig.Config{Gate: fakeGates(t, nil), AutoWrite: true}}
+
+	result, _, err := tools.createImportedCluster(context.Background(), &mcp.CallToolRequest{
+		Params: &mcp.CallToolParamsRaw{Name: "createImportedCluster"},
+	}, createImportedClusterParams{Name: "test-cluster"})
+	require.NoError(t, err)
+	require.NotEmpty(t, result.Content)
+	assert.Equal(t, 1, requests, "auto-write create must call the Rancher API")
 }
 
 func TestCreateImportedClusterObj(t *testing.T) {

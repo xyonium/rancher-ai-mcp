@@ -9,6 +9,7 @@ import (
 
 	"github.com/modelcontextprotocol/go-sdk/mcp"
 	"github.com/rancher/rancher-ai-mcp/internal/middleware"
+	"github.com/rancher/rancher-ai-mcp/pkg/confirm"
 	"github.com/rancher/rancher-ai-mcp/pkg/converter"
 	"github.com/rancher/rancher-ai-mcp/pkg/response"
 	"github.com/rancher/rancher-ai-mcp/pkg/utils"
@@ -25,8 +26,13 @@ type scaleNodePoolParameters struct {
 	DesiredSize      int    `json:"desiredSize,omitempty" jsonschema:"the desired size of the node pool. Overridden by amountToAdd and amountToSubtract if either are specified. If no specific size is provided, use zero"`
 	AmountToAdd      int    `json:"amountToAdd,omitempty" jsonschema:"the amount of nodes to add to the node pool. If specified, desiredSize will be ignored. Cannot be used with amountToSubtract. If no specific amount is provided, use zero"`
 	AmountToSubtract int    `json:"amountToSubtract,omitempty" jsonschema:"the amount of nodes to remove from the node pool. If specified, desiredSize will be ignored. Cannot be used with amountToAdd. If no specific amount is provided, use zero"`
+
+	ConfirmationToken string `json:"confirmationToken,omitempty" jsonschema:"REQUIRED (unless the server runs in auto-write mode): the single-use confirmationToken returned by scaleClusterNodePoolPlan for THIS exact operation. Never invent, reuse, or guess a token"`
 }
 
+// scaleClusterNodePool changes the size of an existing node pool. The execution
+// is gated behind a single-use plan token plus a direct user confirmation, and
+// the user approves the exact patch bytes that are applied.
 func (t *Tools) scaleClusterNodePool(ctx context.Context, toolReq *mcp.CallToolRequest, params scaleNodePoolParameters) (*mcp.CallToolResult, any, error) {
 	if params.Namespace == "" || params.Namespace == "default" {
 		params.Namespace = DefaultClusterResourcesNamespace
@@ -61,6 +67,19 @@ func (t *Tools) scaleClusterNodePool(ctx context.Context, toolReq *mcp.CallToolR
 	if err != nil {
 		log.Error("failed to create patch for scaling node pool", zap.Error(err))
 		return nil, nil, err
+	}
+
+	// The token binds the exact patch bytes that will be applied: the same
+	// canonical bytes are shown to the user, hashed into the token and sent to
+	// the cluster.
+	op := confirm.Operation{Tool: "scaleClusterNodePool", Cluster: params.Cluster, Namespace: params.Namespace, Kind: "nodepool", Name: params.NodePoolName, Payload: patchBytes}
+	summary := fmt.Sprintf("SCALE node pool %s of cluster %q in namespace %q of cluster %q to the size given by this patch:\n%s", params.NodePoolName, params.Cluster, params.Namespace, LocalCluster, patchBytes)
+	approved, err := t.cfg.Gate.Check(ctx, toolReq.Session, op, params.ConfirmationToken, summary, "", t.cfg.AutoWrite)
+	if err != nil {
+		return nil, nil, err
+	}
+	if !approved {
+		return confirm.CancelledResult(), nil, nil
 	}
 
 	log.Debug("Patching prov cluster with new node pool size", zap.String("patch", string(patchBytes)))
