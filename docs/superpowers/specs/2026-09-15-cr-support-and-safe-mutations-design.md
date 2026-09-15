@@ -1,7 +1,7 @@
 # 设计文档：任意自定义 CR 支持 + 安全门控的集群修改能力
 
 > 日期：2026-09-15
-> 基础：`rancher/rancher-ai-mcp` main @ `dc9c367`(v0.36.4)，改造依据见 `rancher-ai-mcp-fork-analysis.md`
+> 基础：`rancher/rancher-ai-mcp` main @ `dc9c367`(v0.36.4)，改造依据见 `docs/rancher-ai-mcp-fork-analysis.md`
 > 状态：待评审
 
 ## 1. 背景与目标
