@@ -6,12 +6,15 @@ import (
 	"fmt"
 	"log"
 	"net/http"
+	"os"
+	"strconv"
 
 	"github.com/modelcontextprotocol/go-sdk/mcp"
 	"github.com/rancher/dynamiclistener"
 	"github.com/rancher/dynamiclistener/server"
 	"github.com/rancher/rancher-ai-mcp/internal/middleware"
 	"github.com/rancher/rancher-ai-mcp/pkg/client"
+	"github.com/rancher/rancher-ai-mcp/pkg/confirm"
 	"github.com/rancher/rancher-ai-mcp/pkg/toolconfig"
 	"github.com/rancher/rancher-ai-mcp/pkg/toolsets"
 	"github.com/rancher/wrangler/v3/pkg/generated/controllers/core"
@@ -31,6 +34,8 @@ var (
 	port           int
 	insecure       bool
 	readOnly       bool
+	allowAutoWrite bool
+	enableExec     bool
 	authzServerURL string
 	jwksURL        string
 	resourceURL    string
@@ -49,6 +54,8 @@ func init() {
 	serveCmd.Flags().IntVar(&port, "port", 9092, "Port to listen on")
 	serveCmd.Flags().BoolVar(&insecure, "insecure", false, "Skip TLS verification")
 	serveCmd.Flags().BoolVar(&readOnly, "read-only", false, "Only register read-only tools")
+	serveCmd.Flags().BoolVar(&allowAutoWrite, "allow-auto-write", false, "Allow create/update-class tools to execute without per-operation user confirmation (env MCP_ALLOW_AUTO_WRITE). Delete and exec always require confirmation. DANGEROUS: enable only for trusted automation")
+	serveCmd.Flags().BoolVar(&enableExec, "enable-exec", false, "Register the execPod tools (env MCP_ENABLE_EXEC). Disabled by default")
 
 	serveCmd.Flags().StringVar(&authzServerURL, "authz-server-url", "", "Authorization Server URL - used to generate the OIDC urls")
 	serveCmd.Flags().StringVar(&jwksURL, "jwks-url", "", "JWKS URL - from the OAuth2 server")
@@ -56,15 +63,29 @@ func init() {
 }
 
 func runServe(cmd *cobra.Command, args []string) error {
-	mcpServer := mcp.NewServer(&mcp.Implementation{Name: "rancher mcp server", Version: "v1.0.0"}, nil)
+	allowAutoWrite = boolFlagOrEnv(cmd, "allow-auto-write", "MCP_ALLOW_AUTO_WRITE", allowAutoWrite)
+	enableExec = boolFlagOrEnv(cmd, "enable-exec", "MCP_ENABLE_EXEC", enableExec)
+
+	cfg, err := serveConfig(readOnly, allowAutoWrite, enableExec)
+	if err != nil {
+		return err
+	}
+
+	mcpServer := mcp.NewServer(&mcp.Implementation{Name: "rancher mcp server", Version: "v1.0.0"}, &mcp.ServerOptions{
+		Instructions: toolsets.SafetyInstructions(cfg),
+	})
 	client, err := client.NewClient(insecure, authzServerURL)
 	if err != nil {
 		return fmt.Errorf("failed to create client: %w", err)
 	}
 
-	toolsets.AddAllTools(client, mcpServer, toolconfig.Config{ReadOnly: readOnly})
+	toolsets.AddAllTools(client, mcpServer, cfg)
 
+	if allowAutoWrite {
+		zap.L().Warn("AUTO-WRITE MODE ENABLED: create/update-class tools will execute WITHOUT per-operation user confirmation; delete and exec still require confirmation")
+	}
 	zap.L().Info("read-only mode", zap.Bool("enabled", readOnly))
+	zap.L().Info("exec tools", zap.Bool("enabled", enableExec))
 
 	handler := mcp.NewStreamableHTTPHandler(func(request *http.Request) *mcp.Server {
 		return mcpServer
@@ -88,6 +109,32 @@ func runServe(cmd *cobra.Command, args []string) error {
 	}
 
 	return startTLSServer(mux)
+}
+
+// serveConfig builds the tool configuration the server runs with. It always
+// injects a confirmation gate: every mutating tool dereferences it, so a nil
+// gate would panic (plan tools) or fail closed (execute tools) in production.
+func serveConfig(readOnly, allowAutoWrite, enableExec bool) (toolconfig.Config, error) {
+	gate, err := confirm.NewGate()
+	if err != nil {
+		return toolconfig.Config{}, fmt.Errorf("failed to initialize confirmation gate: %w", err)
+	}
+	return toolconfig.Config{ReadOnly: readOnly, AutoWrite: allowAutoWrite, EnableExec: enableExec, Gate: gate}, nil
+}
+
+// boolFlagOrEnv resolves a boolean startup option. An explicitly set flag
+// always wins; otherwise the environment variable is used when it parses as a
+// boolean; otherwise the flag's default applies.
+func boolFlagOrEnv(cmd *cobra.Command, flagName, envName string, flagVal bool) bool {
+	if cmd.Flags().Changed(flagName) {
+		return flagVal
+	}
+	if v := os.Getenv(envName); v != "" {
+		if b, err := strconv.ParseBool(v); err == nil {
+			return b
+		}
+	}
+	return flagVal
 }
 
 func startInsecureServer(handler http.Handler) error {
