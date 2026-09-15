@@ -110,7 +110,7 @@ This should only be used when information about the supported rke2 and k3s is ne
 				toolsSetAnn: ToolsSet,
 			},
 			Annotations: &mcp.ToolAnnotations{ReadOnlyHint: false, DestructiveHint: ptr.To(true), IdempotentHint: false, OpenWorldHint: ptr.To(false)},
-			Description: `SECURITY: This tool SCALES a node pool of an existing cluster and changes its state. Protocol, no exceptions: (1) Call scaleClusterNodePoolPlan first and show the user the exact patch. (2) Obtain the user's EXPLICIT approval for THIS EXACT change. (3) Call this tool with the confirmationToken from the plan response. The server then asks the USER DIRECTLY to confirm — you cannot and MUST NOT answer on their behalf. Approval never carries over; never scale proactively or in batches.
+			Description: toolconfig.SecurityProtocol(t.cfg, `SECURITY: This tool SCALES a node pool of an existing cluster and changes its state. Protocol, no exceptions: (1) Call scaleClusterNodePoolPlan first and show the user the exact patch. (2) Obtain the user's EXPLICIT approval for THIS EXACT change. (3) Call this tool with the confirmationToken from the plan response. The server then asks the USER DIRECTLY to confirm — you cannot and MUST NOT answer on their behalf. Approval never carries over; never scale proactively or in batches.`) + `
 
 Changes the size of an existing node pool for an rke2 or k3s cluster.
 This should be used when the user wants to change the size of an existing node pool for an rke2 or k3s cluster.
@@ -138,7 +138,7 @@ The local cluster does not support node pool scaling.`},
 				toolsSetAnn: ToolsSet,
 			},
 			Annotations: &mcp.ToolAnnotations{ReadOnlyHint: false, IdempotentHint: false, OpenWorldHint: ptr.To(false)},
-			Description: `SECURITY: This tool CREATES a cluster and changes its state. Protocol, no exceptions: (1) Call createK3kClusterPlan first and show the user the complete cluster object. (2) Obtain the user's EXPLICIT approval for THIS EXACT creation. (3) Call this tool with the confirmationToken from the plan response. The server then asks the USER DIRECTLY to confirm — you cannot and MUST NOT answer on their behalf. Approval never carries over to any other operation; never create resources proactively.
+			Description: toolconfig.SecurityProtocol(t.cfg, `SECURITY: This tool CREATES a cluster and changes its state. Protocol, no exceptions: (1) Call createK3kClusterPlan first and show the user the complete cluster object. (2) Obtain the user's EXPLICIT approval for THIS EXACT creation. (3) Call this tool with the confirmationToken from the plan response. The server then asks the USER DIRECTLY to confirm — you cannot and MUST NOT answer on their behalf. Approval never carries over to any other operation; never create resources proactively.`) + `
 
 Create a new K3k cluster in a specific downstream cluster.`},
 			t.createK3kCluster)
@@ -160,7 +160,7 @@ Plans to create a new K3k cluster in a specific downstream cluster. It returns t
 				toolsSetAnn: ToolsSet,
 			},
 			Annotations: &mcp.ToolAnnotations{ReadOnlyHint: false, IdempotentHint: false, OpenWorldHint: ptr.To(false)},
-			Description: `SECURITY: This tool CREATES a cluster and changes its state. Protocol, no exceptions: (1) Call createImportedClusterPlan first and show the user the complete cluster object. (2) Obtain the user's EXPLICIT approval for THIS EXACT creation. (3) Call this tool with the confirmationToken from the plan response. The server then asks the USER DIRECTLY to confirm — you cannot and MUST NOT answer on their behalf. Approval never carries over to any other operation; never create resources proactively.
+			Description: toolconfig.SecurityProtocol(t.cfg, `SECURITY: This tool CREATES a cluster and changes its state. Protocol, no exceptions: (1) Call createImportedClusterPlan first and show the user the complete cluster object. (2) Obtain the user's EXPLICIT approval for THIS EXACT creation. (3) Call this tool with the confirmationToken from the plan response. The server then asks the USER DIRECTLY to confirm — you cannot and MUST NOT answer on their behalf. Approval never carries over to any other operation; never create resources proactively.`) + `
 
 Creates an imported cluster within Rancher.
 This should only be used when the user wants to create a new imported cluster. Do not use this tool when the user asks to create a new custom cluster.`},
@@ -184,7 +184,7 @@ This should only be used when the user wants to create a new imported cluster. D
 				toolsSetAnn: ToolsSet,
 			},
 			Annotations: &mcp.ToolAnnotations{ReadOnlyHint: false, IdempotentHint: false, OpenWorldHint: ptr.To(false)},
-			Description: `SECURITY: This tool CREATES a cluster and changes its state. Protocol, no exceptions: (1) Call createCustomClusterPlan first and show the user the complete cluster object. (2) Obtain the user's EXPLICIT approval for THIS EXACT creation. (3) Call this tool with the confirmationToken from the plan response. The server then asks the USER DIRECTLY to confirm — you cannot and MUST NOT answer on their behalf. Approval never carries over to any other operation; never create resources proactively.
+			Description: toolconfig.SecurityProtocol(t.cfg, `SECURITY: This tool CREATES a cluster and changes its state. Protocol, no exceptions: (1) Call createCustomClusterPlan first and show the user the complete cluster object. (2) Obtain the user's EXPLICIT approval for THIS EXACT creation. (3) Call this tool with the confirmationToken from the plan response. The server then asks the USER DIRECTLY to confirm — you cannot and MUST NOT answer on their behalf. Approval never carries over to any other operation; never create resources proactively.`) + `
 
 Creates a custom cluster within Rancher.
 This should only be used when the user wants to create a new custom cluster. Do not use this tool if a user asks to create an imported cluster.`},

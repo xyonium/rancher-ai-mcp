@@ -119,3 +119,37 @@ func TestProvisioningReadOnlyMode(t *testing.T) {
 		assert.Contains(t, tools, name)
 	}
 }
+
+// TestProvisioningAutoWriteToolMetadata proves the spec §5.1 requirement that
+// in auto-write mode every create/patch-class description truthfully declares
+// the automation mode instead of promising a confirmation the gate will not
+// perform. TestProvisioningWriteToolMetadata pins the default-mode text.
+func TestProvisioningAutoWriteToolMetadata(t *testing.T) {
+	tools := listRegisteredTools(t, toolconfig.Config{AutoWrite: true})
+
+	for _, name := range []string{"scaleClusterNodePool", "createK3kCluster", "createImportedCluster", "createCustomCluster"} {
+		tool, ok := tools[name]
+		require.True(t, ok, "tool %s must be registered in auto-write mode", name)
+		desc := tool.Description
+		assert.Contains(t, desc, "AUTO-WRITE", "%s must declare the automation mode", name)
+		assert.Contains(t, desc, "IMMEDIATELY", "%s must state it executes immediately", name)
+		assert.Contains(t, desc, "NO confirmationToken", "%s must state no token is needed", name)
+		assert.Contains(t, desc, "NO server-initiated user confirmation", "%s must state the server will not ask the user", name)
+		assert.Contains(t, desc, "deleteKubernetesResource", "%s must name deleteKubernetesResource as still gated", name)
+		assert.Contains(t, desc, "execPod", "%s must name execPod as still gated", name)
+		assert.Contains(t, desc, "ALWAYS require", "%s must state delete/exec always require the full protocol", name)
+		assert.Contains(t, desc, "ONLY when the user has explicitly asked", "%s must require an explicit user request", name)
+		assert.NotContains(t, desc, "The server then asks the USER DIRECTLY to confirm",
+			"%s must not promise a confirmation in auto-write mode", name)
+		assert.NotContains(t, desc, "(3) Call this tool with the confirmationToken",
+			"%s must not require the plan token in auto-write mode", name)
+	}
+
+	// The plan tools keep minting tokens in every mode.
+	for _, name := range []string{"scaleClusterNodePoolPlan", "createK3kClusterPlan", "createImportedClusterPlan", "createCustomClusterPlan"} {
+		tool, ok := tools[name]
+		require.True(t, ok, "tool %s must be registered", name)
+		assert.Contains(t, tool.Description, "single-use confirmationToken", "plan tool %s mints tokens in every mode", name)
+		assert.NotContains(t, tool.Description, "AUTO-WRITE", "plan tool %s must not declare auto-write execution", name)
+	}
+}

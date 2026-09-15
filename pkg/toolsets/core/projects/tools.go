@@ -80,7 +80,7 @@ The resource usage includes CPU and memory requests, limits and actual usage, as
 				toolsSetAnn: toolsSet,
 			},
 			Annotations: &mcp.ToolAnnotations{ReadOnlyHint: false, IdempotentHint: false, OpenWorldHint: ptr.To(false)},
-			Description: `SECURITY: This tool CREATES a project in the cluster and changes its state. Protocol, no exceptions: (1) Call createProjectPlan first and show the user the complete project object. (2) Obtain the user's EXPLICIT approval for THIS EXACT creation. (3) Call this tool with the confirmationToken from the plan response. The server then asks the USER DIRECTLY to confirm — you cannot and MUST NOT answer on their behalf. Approval never carries over to any other operation; never create resources proactively.
+			Description: toolconfig.SecurityProtocol(t.cfg, `SECURITY: This tool CREATES a project in the cluster and changes its state. Protocol, no exceptions: (1) Call createProjectPlan first and show the user the complete project object. (2) Obtain the user's EXPLICIT approval for THIS EXACT creation. (3) Call this tool with the confirmationToken from the plan response. The server then asks the USER DIRECTLY to confirm — you cannot and MUST NOT answer on their behalf. Approval never carries over to any other operation; never create resources proactively.`) + `
 
 Creates a project resource for a specified cluster with the given containerResourceQuota.`},
 			t.createProject)

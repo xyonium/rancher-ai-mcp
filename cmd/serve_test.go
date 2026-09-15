@@ -9,6 +9,9 @@ import (
 	"github.com/spf13/cobra"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+	"go.uber.org/zap"
+	"go.uber.org/zap/zapcore"
+	"go.uber.org/zap/zaptest/observer"
 )
 
 func TestServeCmd(t *testing.T) {
@@ -106,6 +109,46 @@ func TestServeConfigGate(t *testing.T) {
 	tok, err := cfg.Gate.IssueToken(op)
 	require.NoError(t, err)
 	require.NoError(t, cfg.Gate.RequireToken(op, tok))
+}
+
+// TestWarnStartupModesAutoWrite pins that the auto-write startup warning is
+// gated on (!readOnly): read-only mode registers no write tools at all, so the
+// warning would be a false statement there.
+func TestWarnStartupModesAutoWrite(t *testing.T) {
+	tests := []struct {
+		name           string
+		readOnly       bool
+		allowAutoWrite bool
+		wantWarning    bool
+	}{
+		{name: "auto-write alone warns", allowAutoWrite: true, wantWarning: true},
+		{name: "read-only plus auto-write does not warn", readOnly: true, allowAutoWrite: true, wantWarning: false},
+		{name: "default mode does not warn", wantWarning: false},
+		{name: "read-only alone does not warn", readOnly: true, wantWarning: false},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			core, observed := observer.New(zapcore.InfoLevel)
+			original := zap.L()
+			zap.ReplaceGlobals(zap.New(core))
+			t.Cleanup(func() { zap.ReplaceGlobals(original) })
+
+			warnStartupModes(tt.readOnly, tt.allowAutoWrite, false)
+
+			warnings := observed.FilterMessageSnippet("AUTO-WRITE MODE ENABLED").All()
+			if tt.wantWarning {
+				require.Len(t, warnings, 1, "auto-write mode must warn when it is in effect")
+				assert.Contains(t, warnings[0].Message, "WITHOUT per-operation user confirmation")
+			} else {
+				assert.Empty(t, warnings, "the auto-write warning must not fire when it does not apply")
+			}
+
+			// The mode info lines are unconditional.
+			assert.Len(t, observed.FilterMessage("read-only mode").All(), 1)
+			assert.Len(t, observed.FilterMessage("exec tools").All(), 1)
+		})
+	}
 }
 
 func TestServeConfigModes(t *testing.T) {

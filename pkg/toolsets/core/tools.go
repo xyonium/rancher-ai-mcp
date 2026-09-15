@@ -166,7 +166,7 @@ Supports any resource kind including custom resources. If the kind is unknown to
 				toolsSetAnn: toolsSet,
 			},
 			Annotations: &mcp.ToolAnnotations{ReadOnlyHint: false, IdempotentHint: false, OpenWorldHint: ptr.To(false)},
-			Description: `SECURITY: This tool CREATES a resource in the cluster and changes its state. Protocol, no exceptions: (1) Call createKubernetesResourcePlan first and show the user the complete manifest. (2) Obtain the user's EXPLICIT approval for THIS EXACT creation. (3) Call this tool with the confirmationToken from the plan response. The server then asks the USER DIRECTLY to confirm — you cannot and MUST NOT answer on their behalf. Approval never carries over to any other operation; never create resources proactively.
+			Description: toolconfig.SecurityProtocol(t.cfg, `SECURITY: This tool CREATES a resource in the cluster and changes its state. Protocol, no exceptions: (1) Call createKubernetesResourcePlan first and show the user the complete manifest. (2) Obtain the user's EXPLICIT approval for THIS EXACT creation. (3) Call this tool with the confirmationToken from the plan response. The server then asks the USER DIRECTLY to confirm — you cannot and MUST NOT answer on their behalf. Approval never carries over to any other operation; never create resources proactively.`) + `
 
 Creates a resource in a Kubernetes cluster from a complete Kubernetes manifest passed in the 'manifest' field, in YAML or JSON. Any resource kind is supported, including custom resources: the target API is resolved from the manifest's own apiVersion and kind via cluster API discovery. The namespace must be empty for cluster-wide resources.
 
@@ -198,7 +198,7 @@ Plans to create a resource in a Kubernetes cluster from a complete Kubernetes ma
 			},
 			Annotations: &mcp.ToolAnnotations{ReadOnlyHint: false, DestructiveHint: ptr.To(true), IdempotentHint: false, OpenWorldHint: ptr.To(false)},
 			InputSchema: patchResourceInputSchema(),
-			Description: `SECURITY: This tool MODIFIES an existing resource in the cluster. Protocol, no exceptions: (1) Call patchKubernetesResourcePlan first and show the user the exact patch. (2) Obtain the user's EXPLICIT approval for THIS EXACT patch. (3) Call this tool with the confirmationToken from the plan response. The server then asks the USER DIRECTLY to confirm — you cannot and MUST NOT answer on their behalf. Approval never carries over; never patch proactively or in batches.
+			Description: toolconfig.SecurityProtocol(t.cfg, `SECURITY: This tool MODIFIES an existing resource in the cluster. Protocol, no exceptions: (1) Call patchKubernetesResourcePlan first and show the user the exact patch. (2) Obtain the user's EXPLICIT approval for THIS EXACT patch. (3) Call this tool with the confirmationToken from the plan response. The server then asks the USER DIRECTLY to confirm — you cannot and MUST NOT answer on their behalf. Approval never carries over; never patch proactively or in batches.`) + `
 
 Patches a Kubernetes resource using a JSON patch. Any resource kind is supported, including custom resources (use apiVersion or a group-qualified kind to disambiguate). The namespace must be empty for cluster-wide resources. The content type used is application/json-patch+json. Returns the modified resource.`},
 			t.updateKubernetesResource,

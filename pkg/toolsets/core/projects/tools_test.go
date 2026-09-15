@@ -86,3 +86,32 @@ func TestProjectsToolsReadOnlyMode(t *testing.T) {
 		assert.Contains(t, tools, name)
 	}
 }
+
+// TestProjectsAutoWriteDescription proves the spec §5.1 requirement that in
+// auto-write mode createProject's description truthfully declares the
+// automation mode; the default-mode text is pinned separately above.
+func TestProjectsAutoWriteDescription(t *testing.T) {
+	tools := listRegisteredTools(t, toolconfig.Config{AutoWrite: true})
+
+	create := tools["createProject"]
+	require.NotNil(t, create, "createProject must be registered in auto-write mode")
+	desc := create.Description
+	assert.Contains(t, desc, "AUTO-WRITE", "createProject must declare the automation mode")
+	assert.Contains(t, desc, "IMMEDIATELY", "createProject must state it executes immediately")
+	assert.Contains(t, desc, "NO confirmationToken", "createProject must state no token is needed")
+	assert.Contains(t, desc, "NO server-initiated user confirmation", "createProject must state the server will not ask the user")
+	assert.Contains(t, desc, "deleteKubernetesResource", "createProject must name deleteKubernetesResource as still gated")
+	assert.Contains(t, desc, "execPod", "createProject must name execPod as still gated")
+	assert.Contains(t, desc, "ALWAYS require", "createProject must state delete/exec always require the full protocol")
+	assert.Contains(t, desc, "ONLY when the user has explicitly asked", "createProject must require an explicit user request")
+	assert.NotContains(t, desc, "The server then asks the USER DIRECTLY to confirm",
+		"createProject must not promise a confirmation in auto-write mode")
+	assert.NotContains(t, desc, "(3) Call this tool with the confirmationToken",
+		"createProject must not require the plan token in auto-write mode")
+
+	// The plan tool keeps minting tokens in every mode.
+	plan := tools["createProjectPlan"]
+	require.NotNil(t, plan)
+	assert.Contains(t, plan.Description, "single-use confirmationToken")
+	assert.NotContains(t, plan.Description, "AUTO-WRITE")
+}

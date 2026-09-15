@@ -81,11 +81,7 @@ func runServe(cmd *cobra.Command, args []string) error {
 
 	toolsets.AddAllTools(client, mcpServer, cfg)
 
-	if allowAutoWrite {
-		zap.L().Warn("AUTO-WRITE MODE ENABLED: create/update-class tools will execute WITHOUT per-operation user confirmation; delete and exec still require confirmation")
-	}
-	zap.L().Info("read-only mode", zap.Bool("enabled", readOnly))
-	zap.L().Info("exec tools", zap.Bool("enabled", enableExec))
+	warnStartupModes(readOnly, allowAutoWrite, enableExec)
 
 	handler := mcp.NewStreamableHTTPHandler(func(request *http.Request) *mcp.Server {
 		return mcpServer
@@ -109,6 +105,18 @@ func runServe(cmd *cobra.Command, args []string) error {
 	}
 
 	return startTLSServer(mux)
+}
+
+// warnStartupModes logs the safety-relevant startup modes. The auto-write
+// warning is gated on !readOnly: read-only mode registers no write tools at
+// all, so claiming create/update-class tools will execute without confirmation
+// would be false (read-only has the highest precedence).
+func warnStartupModes(readOnly, allowAutoWrite, enableExec bool) {
+	if allowAutoWrite && !readOnly {
+		zap.L().Warn("AUTO-WRITE MODE ENABLED: create/update-class tools will execute WITHOUT per-operation user confirmation; delete and exec still require confirmation")
+	}
+	zap.L().Info("read-only mode", zap.Bool("enabled", readOnly))
+	zap.L().Info("exec tools", zap.Bool("enabled", enableExec))
 }
 
 // serveConfig builds the tool configuration the server runs with. It always

@@ -375,3 +375,86 @@ func TestDeleteToolMetadata(t *testing.T) {
 	assert.True(t, strings.HasPrefix(plan.Description, "SECURITY: "), "plan description must open with the SECURITY block")
 	assert.Contains(t, plan.Description, "confirmationToken")
 }
+
+// listRegisteredToolsInMemory connects an in-memory MCP client to a server with
+// the core tools registered under the given config and returns them by name.
+func listRegisteredToolsInMemory(t *testing.T, cfg toolconfig.Config) map[string]*mcp.Tool {
+	t.Helper()
+	c, _ := client.NewClient(true, "")
+	server := mcp.NewServer(&mcp.Implementation{Name: "test-server", Version: "v1.0.0"}, nil)
+	NewTools(c, cfg).AddTools(server)
+
+	serverTransport, clientTransport := mcp.NewInMemoryTransports()
+	serverSession, err := server.Connect(t.Context(), serverTransport, nil)
+	require.NoError(t, err)
+	defer serverSession.Close()
+
+	mcpClient := mcp.NewClient(&mcp.Implementation{Name: "mcp-client", Version: "v1.0.0"}, nil)
+	clientSession, err := mcpClient.Connect(t.Context(), clientTransport, nil)
+	require.NoError(t, err)
+	defer clientSession.Close()
+
+	list, err := clientSession.ListTools(t.Context(), &mcp.ListToolsParams{})
+	require.NoError(t, err)
+
+	byName := make(map[string]*mcp.Tool, len(list.Tools))
+	for _, tool := range list.Tools {
+		byName[tool.Name] = tool
+	}
+	return byName
+}
+
+// TestCreatePatchAutoWriteDescriptions proves the spec §5.1 requirement that in
+// auto-write mode the create/patch-class tool descriptions truthfully declare
+// the automation mode: they must announce AUTO-WRITE execution without a
+// confirmationToken or a server-initiated user confirmation, and must never
+// promise the confirmation the gate will not perform.
+func TestCreatePatchAutoWriteDescriptions(t *testing.T) {
+	tools := listRegisteredToolsInMemory(t, toolconfig.Config{AutoWrite: true})
+
+	executeTools := []string{"createKubernetesResource", "patchKubernetesResource"}
+	for _, name := range executeTools {
+		tool, ok := tools[name]
+		require.True(t, ok, "tool %s must be registered", name)
+		desc := tool.Description
+		assert.Contains(t, desc, "AUTO-WRITE", "%s must declare the automation mode", name)
+		assert.Contains(t, desc, "IMMEDIATELY", "%s must state it executes immediately", name)
+		assert.Contains(t, desc, "NO confirmationToken", "%s must state no token is needed", name)
+		assert.Contains(t, desc, "NO server-initiated user confirmation", "%s must state the server will not ask the user", name)
+		assert.Contains(t, desc, "deleteKubernetesResource", "%s must name deleteKubernetesResource as still gated", name)
+		assert.Contains(t, desc, "execPod", "%s must name execPod as still gated", name)
+		assert.Contains(t, desc, "ALWAYS require", "%s must state delete/exec always require the full protocol", name)
+		assert.Contains(t, desc, "ONLY when the user has explicitly asked", "%s must require an explicit user request", name)
+		// The false promise must be gone, and the token must not be advertised
+		// as required.
+		assert.NotContains(t, desc, "The server then asks the USER DIRECTLY to confirm",
+			"%s must not promise a confirmation in auto-write mode", name)
+		assert.NotContains(t, desc, "(3) Call this tool with the confirmationToken",
+			"%s must not require the plan token in auto-write mode", name)
+	}
+
+	// Delete and exec keep the full protocol in every mode: their descriptions
+	// must be untouched by the auto-write variant.
+	del := tools["deleteKubernetesResource"]
+	require.NotNil(t, del)
+	assert.Contains(t, del.Description, "The server then asks the USER DIRECTLY", "delete must still demand the direct confirmation")
+	assert.Contains(t, del.Description, "ALWAYS requires confirmation, even in auto-write mode")
+
+	if exec, ok := tools["execPod"]; ok {
+		assert.Contains(t, exec.Description, "ALWAYS requires confirmation, even in auto-write mode")
+	}
+}
+
+// TestCreatePatchAutoWriteDescriptionsDoNotAffectPlans pins that plan tools keep
+// the token protocol in auto-write mode: they still mint tokens, so their
+// descriptions must still say so.
+func TestCreatePatchAutoWriteDescriptionsDoNotAffectPlans(t *testing.T) {
+	tools := listRegisteredToolsInMemory(t, toolconfig.Config{AutoWrite: true})
+
+	for _, name := range []string{"createKubernetesResourcePlan", "patchKubernetesResourcePlan", "deleteKubernetesResourcePlan"} {
+		tool, ok := tools[name]
+		require.True(t, ok, "tool %s must be registered", name)
+		assert.Contains(t, tool.Description, "single-use confirmationToken", "plan tool %s mints tokens in every mode", name)
+		assert.NotContains(t, tool.Description, "AUTO-WRITE", "plan tool %s must not declare auto-write execution", name)
+	}
+}
