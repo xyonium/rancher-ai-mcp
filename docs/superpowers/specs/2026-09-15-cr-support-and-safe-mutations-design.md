@@ -47,8 +47,8 @@ func (c *Client) ResolveGVR(ctx context.Context, token, cluster, kind, apiVersio
 解析顺序（命中即返回）:
 
 1. **`apiVersion` 非空**（如 `harvesterhci.io/v1beta1`):`schema.ParseGroupVersion` 解析 → 在该 group/version 的 `APIResourceList` 中按 kind 大小写不敏感匹配 → 得到 resource。未命中 → 报错并列出该 group/version 下可用 kind
-2. **group 限定 kind**：支持 `harvesterhci.io/VirtualMachine` 与 `VirtualMachine.harvesterhci.io` 两种形式 → 锁定 group，取该 group 的 preferred version
-3. **硬编码表命中**(`converter.K8sKindsToGVRs`，小写）→ 直接使用。保持向后兼容，含 capi/management/provisioning/fleet 前缀 quirk
+2. **硬编码表命中**(`converter.K8sKindsToGVRs`，小写）→ 直接使用。保持向后兼容，含 capi/management/provisioning/fleet 前缀 quirk 与 `pod.metrics.k8s.io` 等带点伪 kind（必须先于 group 限定解析，否则会被误判为 kind.group 形式）
+3. **group 限定 kind**：支持 `harvesterhci.io/VirtualMachine` 与 `VirtualMachine.harvesterhci.io` 两种形式 → 锁定 group，取该 group 的 preferred version
 4. **discovery 兜底**：遍历缓存的 `APIResourceList`，全集群大小写不敏感匹配 kind:
    - 恰好 1 个命中 → 使用
    - 多个 group 命中 → 报错并列出候选 group 列表，引导调用者用 group 限定 kind 或 `apiVersion`
