@@ -70,16 +70,27 @@ func PlanInputSchema() *jsonschema.Schema {
 	s.Properties["operation"].Enum = enumOf(ChangeOperations)
 	forcePlainType(s, "command", "array")
 	forcePlainType(s, "patch", "array")
+	// json.RawMessage infers items as integer(0-255); a JSON patch is an array
+	// of objects. Replace the items schema with a permissive one — the handler's
+	// patchList() validates the real shape.
+	s.Properties["patch"].Items = &jsonschema.Schema{}
 	return s
 }
 
-// ExecuteInputSchema builds the executeChange input schema: the plan schema
-// plus a required confirmationToken.
-func ExecuteInputSchema() *jsonschema.Schema {
+// ExecuteInputSchema builds the executeChange input schema. requireToken
+// mirrors the server's auto-write mode: when writes are auto-approved there is
+// no token to pass, so the schema must not demand one.
+func ExecuteInputSchema(requireToken bool) *jsonschema.Schema {
 	s := mustSchema(jsonschema.For[ChangeParams](nil))
 	s.Properties["operation"].Enum = enumOf(ChangeOperations)
 	forcePlainType(s, "command", "array")
 	forcePlainType(s, "patch", "array")
-	s.Required = append(s.Required, "confirmationToken")
+	// json.RawMessage infers items as integer(0-255); a JSON patch is an array
+	// of objects. Replace the items schema with a permissive one — the handler's
+	// patchList() validates the real shape.
+	s.Properties["patch"].Items = &jsonschema.Schema{}
+	if requireToken {
+		s.Required = append(s.Required, "confirmationToken")
+	}
 	return s
 }

@@ -4,6 +4,7 @@ package dispatch
 import (
 	"context"
 	"errors"
+	"slices"
 	"strings"
 	"testing"
 
@@ -93,7 +94,7 @@ func TestSchemas(t *testing.T) {
 			t.Fatal("plan schema must NOT require confirmationToken")
 		}
 	}
-	e := ExecuteInputSchema()
+	e := ExecuteInputSchema(true)
 	found := false
 	for _, r := range e.Required {
 		if r == "confirmationToken" {
@@ -101,13 +102,22 @@ func TestSchemas(t *testing.T) {
 		}
 	}
 	if !found {
-		t.Fatal("execute schema must require confirmationToken")
+		t.Fatal("execute schema must require confirmationToken in strict mode")
+	}
+	if slices.Contains(ExecuteInputSchema(false).Required, "confirmationToken") {
+		t.Fatal("execute schema must NOT require confirmationToken in auto-write mode")
 	}
 	if e.Properties["command"].Type != "array" || e.Properties["command"].Types != nil {
 		t.Fatal("command must be forced to plain array type")
 	}
 	if e.Properties["patch"].Type != "array" || e.Properties["patch"].Types != nil {
 		t.Fatal("patch must be forced to plain array type")
+	}
+	if it := e.Properties["patch"].Items; it != nil && it.Type == "integer" {
+		t.Fatal("patch items must not constrain to integer — that rejects real JSON patches")
+	}
+	if it := p.Properties["patch"].Items; it != nil && it.Type == "integer" {
+		t.Fatal("plan patch items must not constrain to integer — that rejects real JSON patches")
 	}
 	d := DiagnoseInputSchema()
 	if len(d.Properties["target"].Enum) != len(DiagnoseTargets) {
