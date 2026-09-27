@@ -32,3 +32,6 @@ deploy/postrenderer/rendered.yaml
 
 # CodeGraph local index
 .codegraph/
+
+# MCP baseline capture output (contains auth headers and golden responses)
+.baseline/

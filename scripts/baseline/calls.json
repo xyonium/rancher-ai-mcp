@@ -1,0 +1,260 @@
+[
+  {
+    "id": "listClusters",
+    "tool": "listClusters",
+    "params": {},
+    "mapsTo": { "tool": "rancherQuery", "params": { "resource": "clusters" } }
+  },
+  {
+    "id": "listProjects",
+    "tool": "listProjects",
+    "params": { "cluster": "${discovered.cluster}" },
+    "mapsTo": { "tool": "rancherQuery", "params": { "resource": "projects", "cluster": "${discovered.cluster}" } }
+  },
+  {
+    "id": "getProject",
+    "tool": "getProject",
+    "params": { "cluster": "${discovered.cluster}", "name": "${discovered.project}" },
+    "mapsTo": { "tool": "rancherQuery", "params": { "resource": "project", "cluster": "${discovered.cluster}", "name": "${discovered.project}" } }
+  },
+  {
+    "id": "getResourceUsage",
+    "tool": "getResourceUsage",
+    "params": { "cluster": "${discovered.cluster}", "project": "${discovered.project}" },
+    "mapsTo": { "tool": "rancherQuery", "params": { "resource": "resourceUsage", "cluster": "${discovered.cluster}", "project": "${discovered.project}" } }
+  },
+  {
+    "id": "getUser",
+    "tool": "getUser",
+    "params": { "username": "${discovered.username}" },
+    "mapsTo": { "tool": "rancherQuery", "params": { "resource": "user", "name": "${discovered.username}" } }
+  },
+  {
+    "id": "getRoleTemplate",
+    "tool": "getRoleTemplate",
+    "params": { "name": "${discovered.roleTemplate}" },
+    "mapsTo": { "tool": "rancherQuery", "params": { "resource": "roleTemplate", "name": "${discovered.roleTemplate}" } }
+  },
+  {
+    "id": "listRoleTemplates",
+    "tool": "listRoleTemplates",
+    "params": {},
+    "mapsTo": { "tool": "rancherQuery", "params": { "resource": "roleTemplates" } }
+  },
+  {
+    "id": "listClusterRoleTemplateBindings",
+    "tool": "listClusterRoleTemplateBindings",
+    "params": { "cluster": "${discovered.cluster}" },
+    "mapsTo": { "tool": "rancherQuery", "params": { "resource": "clusterRTBs", "cluster": "${discovered.cluster}" } }
+  },
+  {
+    "id": "listProjectRoleTemplateBindings",
+    "tool": "listProjectRoleTemplateBindings",
+    "params": { "cluster": "${discovered.cluster}", "projectID": "${discovered.projectID}" },
+    "mapsTo": { "tool": "rancherQuery", "params": { "resource": "projectRTBs", "cluster": "${discovered.cluster}", "project": "${discovered.projectID}" } }
+  },
+  {
+    "id": "listGitRepos",
+    "tool": "listGitRepos",
+    "params": { "workspace": "${discovered.workspace}" },
+    "mapsTo": { "tool": "rancherQuery", "params": { "resource": "gitRepos", "workspace": "${discovered.workspace}" } }
+  },
+  {
+    "id": "getGitRepo",
+    "tool": "getGitRepo",
+    "params": { "workspace": "${discovered.workspace}", "name": "${discovered.gitRepo}" },
+    "mapsTo": { "tool": "rancherQuery", "params": { "resource": "gitRepo", "workspace": "${discovered.workspace}", "name": "${discovered.gitRepo}" } }
+  },
+  {
+    "id": "getBundle",
+    "tool": "getBundle",
+    "params": { "workspace": "${discovered.workspace}", "name": "${discovered.bundleName}" },
+    "mapsTo": { "tool": "rancherQuery", "params": { "resource": "bundle", "workspace": "${discovered.workspace}", "name": "${discovered.bundleName}" } }
+  },
+  {
+    "id": "analyzeFleetResources",
+    "tool": "analyzeFleetResources",
+    "params": { "workspace": "${discovered.workspace}" },
+    "mapsTo": { "tool": "diagnose", "params": { "target": "fleet", "workspace": "${discovered.workspace}" } }
+  },
+  {
+    "id": "getClusterImages",
+    "tool": "getClusterImages",
+    "params": { "clusters": ["${discovered.cluster}"] },
+    "mapsTo": { "tool": "rancherQuery", "params": { "resource": "clusterImages", "clusters": ["${discovered.cluster}"] } }
+  },
+  {
+    "id": "listK3kClusters",
+    "tool": "listK3kClusters",
+    "params": { "clusters": ["${discovered.cluster}"] },
+    "mapsTo": { "tool": "rancherQuery", "params": { "resource": "k3kClusters", "clusters": ["${discovered.cluster}"] } }
+  },
+  {
+    "id": "getClusterMachine",
+    "tool": "getClusterMachine",
+    "params": { "cluster": "${discovered.cluster}", "machineName": "${discovered.machineName}" },
+    "mapsTo": { "tool": "rancherQuery", "params": { "resource": "clusterMachine", "cluster": "${discovered.cluster}", "name": "${discovered.machineName}" } }
+  },
+  {
+    "id": "listSupportedKubernetesVersions",
+    "tool": "listSupportedKubernetesVersions",
+    "params": { "distribution": "rke2" },
+    "mapsTo": { "tool": "rancherQuery", "params": { "resource": "supportedVersions", "distribution": "rke2" } }
+  },
+  {
+    "id": "listAPIResources",
+    "tool": "listAPIResources",
+    "params": { "cluster": "${discovered.cluster}" },
+    "mapsTo": { "tool": "listAPIResources", "params": { "cluster": "${discovered.cluster}" } }
+  },
+  {
+    "id": "getKubernetesResource",
+    "tool": "getKubernetesResource",
+    "params": { "cluster": "${discovered.cluster}", "namespace": "${discovered.deploymentNamespace}", "kind": "deployment", "name": "${discovered.deploymentName}" },
+    "mapsTo": { "tool": "getKubernetesResource", "params": { "cluster": "${discovered.cluster}", "namespace": "${discovered.deploymentNamespace}", "kind": "deployment", "name": "${discovered.deploymentName}" } }
+  },
+  {
+    "id": "listKubernetesResources",
+    "tool": "listKubernetesResources",
+    "params": { "cluster": "${discovered.cluster}", "namespace": "", "kind": "pod", "limit": 5, "offset": 0 },
+    "mapsTo": { "tool": "listKubernetesResources", "params": { "cluster": "${discovered.cluster}", "namespace": "", "kind": "pod", "limit": 5, "offset": 0 } }
+  },
+  {
+    "id": "analyzeCluster",
+    "tool": "analyzeCluster",
+    "params": { "cluster": "${discovered.cluster}" },
+    "mapsTo": { "tool": "diagnose", "params": { "target": "cluster", "cluster": "${discovered.cluster}" } }
+  },
+  {
+    "id": "analyzeClusterMachines",
+    "tool": "analyzeClusterMachines",
+    "params": { "cluster": "${discovered.cluster}" },
+    "mapsTo": { "tool": "diagnose", "params": { "target": "machines", "cluster": "${discovered.cluster}" } }
+  },
+  {
+    "id": "getNodeMetrics",
+    "tool": "getNodeMetrics",
+    "params": { "cluster": "${discovered.cluster}" },
+    "mapsTo": { "tool": "diagnose", "params": { "target": "nodes", "cluster": "${discovered.cluster}" } }
+  },
+  {
+    "id": "getDeployment",
+    "tool": "getDeployment",
+    "params": { "cluster": "${discovered.cluster}", "namespace": "${discovered.deploymentNamespace}", "name": "${discovered.deploymentName}" },
+    "mapsTo": { "tool": "diagnose", "params": { "target": "deployment", "cluster": "${discovered.cluster}", "namespace": "${discovered.deploymentNamespace}", "name": "${discovered.deploymentName}" } }
+  },
+  {
+    "id": "inspectPod",
+    "tool": "inspectPod",
+    "params": { "cluster": "${discovered.cluster}", "namespace": "${discovered.podNamespace}", "name": "${discovered.podName}" },
+    "mapsTo": { "tool": "diagnose", "params": { "target": "pod", "cluster": "${discovered.cluster}", "namespace": "${discovered.podNamespace}", "name": "${discovered.podName}" } }
+  },
+  {
+    "id": "createProjectPlan",
+    "tool": "createProjectPlan",
+    "params": { "cluster": "${discovered.cluster}", "name": "baseline-probe-never-create", "description": "baseline capture synthetic project plan (never executed)" },
+    "mapsTo": { "tool": "planChange", "params": { "operation": "createProject", "cluster": "${discovered.cluster}", "name": "baseline-probe-never-create", "description": "baseline capture synthetic project plan (never executed)" } }
+  },
+  {
+    "id": "createKubernetesResourcePlan",
+    "tool": "createKubernetesResourcePlan",
+    "params": { "cluster": "${discovered.cluster}", "namespace": "${discovered.podNamespace}", "name": "baseline-probe-never-create", "kind": "ConfigMap", "manifest": "apiVersion: v1\nkind: ConfigMap\nmetadata:\n  name: baseline-probe-never-create\ndata:\n  key: value\n" },
+    "mapsTo": { "tool": "planChange", "params": { "operation": "createKubernetesResource", "cluster": "${discovered.cluster}", "namespace": "${discovered.podNamespace}", "name": "baseline-probe-never-create", "kind": "ConfigMap", "manifest": "apiVersion: v1\nkind: ConfigMap\nmetadata:\n  name: baseline-probe-never-create\ndata:\n  key: value\n" } }
+  },
+  {
+    "id": "patchKubernetesResourcePlan",
+    "tool": "patchKubernetesResourcePlan",
+    "params": { "cluster": "${discovered.cluster}", "namespace": "${discovered.deploymentNamespace}", "kind": "deployment", "name": "${discovered.deploymentName}", "patch": [ { "op": "add", "path": "/metadata/annotations/baseline-probe", "value": "never-applied" } ] },
+    "mapsTo": { "tool": "planChange", "params": { "operation": "patchKubernetesResource", "cluster": "${discovered.cluster}", "namespace": "${discovered.deploymentNamespace}", "kind": "deployment", "name": "${discovered.deploymentName}", "patch": [ { "op": "add", "path": "/metadata/annotations/baseline-probe", "value": "never-applied" } ] } }
+  },
+  {
+    "id": "deleteKubernetesResourcePlan",
+    "tool": "deleteKubernetesResourcePlan",
+    "params": { "cluster": "${discovered.cluster}", "namespace": "${discovered.deploymentNamespace}", "kind": "ConfigMap", "name": "kube-root-ca.crt" },
+    "mapsTo": { "tool": "planChange", "params": { "operation": "deleteKubernetesResource", "cluster": "${discovered.cluster}", "namespace": "${discovered.deploymentNamespace}", "kind": "ConfigMap", "name": "kube-root-ca.crt" } }
+  },
+  {
+    "id": "scaleClusterNodePoolPlan",
+    "tool": "scaleClusterNodePoolPlan",
+    "params": { "cluster": "${discovered.cluster}", "namespace": "${discovered.nodePoolNamespace}", "nodePoolName": "${discovered.nodePoolName}", "desiredSize": 1 },
+    "mapsTo": { "tool": "planChange", "params": { "operation": "scaleClusterNodePool", "cluster": "${discovered.cluster}", "namespace": "${discovered.nodePoolNamespace}", "name": "${discovered.nodePoolName}", "desiredSize": 1 } }
+  },
+  {
+    "id": "execPodPlan",
+    "tool": "execPodPlan",
+    "params": { "cluster": "${discovered.cluster}", "namespace": "${discovered.podNamespace}", "name": "${discovered.podName}", "command": [ "true" ] },
+    "mapsTo": { "tool": "planChange", "params": { "operation": "execPod", "cluster": "${discovered.cluster}", "namespace": "${discovered.podNamespace}", "name": "${discovered.podName}", "command": [ "true" ] } }
+  },
+  {
+    "id": "createCustomClusterPlan",
+    "tool": "createCustomClusterPlan",
+    "params": { "name": "baseline-probe-never-create", "CNI": "calico", "version": "${discovered.rke2Version}", "distribution": "rke2", "description": "baseline capture synthetic cluster plan (never executed)" },
+    "mapsTo": { "tool": "planChange", "params": { "operation": "createCustomCluster", "name": "baseline-probe-never-create", "CNI": "calico", "version": "${discovered.rke2Version}", "distribution": "rke2", "description": "baseline capture synthetic cluster plan (never executed)" } }
+  },
+  {
+    "id": "createImportedClusterPlan",
+    "tool": "createImportedClusterPlan",
+    "params": { "name": "baseline-probe-never-create", "description": "baseline capture synthetic imported cluster plan (never executed)" },
+    "mapsTo": { "tool": "planChange", "params": { "operation": "createImportedCluster", "name": "baseline-probe-never-create", "description": "baseline capture synthetic imported cluster plan (never executed)" } }
+  },
+  {
+    "id": "createK3kClusterPlan",
+    "tool": "createK3kClusterPlan",
+    "params": { "name": "baseline-probe-never-create", "namespace": "baseline-probe", "targetCluster": "${discovered.cluster}", "mode": "shared", "servers": 1, "agents": 0 },
+    "mapsTo": { "tool": "planChange", "params": { "operation": "createK3kCluster", "name": "baseline-probe-never-create", "namespace": "baseline-probe", "targetCluster": "${discovered.cluster}", "mode": "shared", "servers": 1, "agents": 0 } }
+  },
+  {
+    "id": "createProject",
+    "tool": "createProject",
+    "params": { "cluster": "${discovered.cluster}", "name": "baseline-probe-never-create", "confirmationToken": "invalid-baseline-token" },
+    "mapsTo": { "tool": "executeChange", "params": { "operation": "createProject", "cluster": "${discovered.cluster}", "name": "baseline-probe-never-create", "confirmationToken": "invalid-baseline-token" } }
+  },
+  {
+    "id": "createKubernetesResource",
+    "tool": "createKubernetesResource",
+    "params": { "cluster": "${discovered.cluster}", "namespace": "${discovered.podNamespace}", "name": "baseline-probe-never-create", "kind": "ConfigMap", "manifest": "apiVersion: v1\nkind: ConfigMap\nmetadata:\n  name: baseline-probe-never-create\ndata:\n  key: value\n", "confirmationToken": "invalid-baseline-token" },
+    "mapsTo": { "tool": "executeChange", "params": { "operation": "createKubernetesResource", "cluster": "${discovered.cluster}", "namespace": "${discovered.podNamespace}", "name": "baseline-probe-never-create", "kind": "ConfigMap", "manifest": "apiVersion: v1\nkind: ConfigMap\nmetadata:\n  name: baseline-probe-never-create\ndata:\n  key: value\n", "confirmationToken": "invalid-baseline-token" } }
+  },
+  {
+    "id": "patchKubernetesResource",
+    "tool": "patchKubernetesResource",
+    "params": { "cluster": "${discovered.cluster}", "namespace": "${discovered.deploymentNamespace}", "kind": "deployment", "name": "${discovered.deploymentName}", "patch": [ { "op": "add", "path": "/metadata/annotations/baseline-probe", "value": "never-applied" } ], "confirmationToken": "invalid-baseline-token" },
+    "mapsTo": { "tool": "executeChange", "params": { "operation": "patchKubernetesResource", "cluster": "${discovered.cluster}", "namespace": "${discovered.deploymentNamespace}", "kind": "deployment", "name": "${discovered.deploymentName}", "patch": [ { "op": "add", "path": "/metadata/annotations/baseline-probe", "value": "never-applied" } ], "confirmationToken": "invalid-baseline-token" } }
+  },
+  {
+    "id": "deleteKubernetesResource",
+    "tool": "deleteKubernetesResource",
+    "params": { "cluster": "${discovered.cluster}", "namespace": "${discovered.deploymentNamespace}", "kind": "ConfigMap", "name": "kube-root-ca.crt", "confirmationToken": "invalid-baseline-token" },
+    "mapsTo": { "tool": "executeChange", "params": { "operation": "deleteKubernetesResource", "cluster": "${discovered.cluster}", "namespace": "${discovered.deploymentNamespace}", "kind": "ConfigMap", "name": "kube-root-ca.crt", "confirmationToken": "invalid-baseline-token" } }
+  },
+  {
+    "id": "scaleClusterNodePool",
+    "tool": "scaleClusterNodePool",
+    "params": { "cluster": "${discovered.cluster}", "namespace": "${discovered.nodePoolNamespace}", "nodePoolName": "${discovered.nodePoolName}", "desiredSize": 1, "confirmationToken": "invalid-baseline-token" },
+    "mapsTo": { "tool": "executeChange", "params": { "operation": "scaleClusterNodePool", "cluster": "${discovered.cluster}", "namespace": "${discovered.nodePoolNamespace}", "name": "${discovered.nodePoolName}", "desiredSize": 1, "confirmationToken": "invalid-baseline-token" } }
+  },
+  {
+    "id": "execPod",
+    "tool": "execPod",
+    "params": { "cluster": "${discovered.cluster}", "namespace": "${discovered.podNamespace}", "name": "${discovered.podName}", "command": [ "true" ], "confirmationToken": "invalid-baseline-token" },
+    "mapsTo": { "tool": "executeChange", "params": { "operation": "execPod", "cluster": "${discovered.cluster}", "namespace": "${discovered.podNamespace}", "name": "${discovered.podName}", "command": [ "true" ], "confirmationToken": "invalid-baseline-token" } }
+  },
+  {
+    "id": "createCustomCluster",
+    "tool": "createCustomCluster",
+    "params": { "name": "baseline-probe-never-create", "CNI": "calico", "version": "${discovered.rke2Version}", "distribution": "rke2", "confirmationToken": "invalid-baseline-token" },
+    "mapsTo": { "tool": "executeChange", "params": { "operation": "createCustomCluster", "name": "baseline-probe-never-create", "CNI": "calico", "version": "${discovered.rke2Version}", "distribution": "rke2", "confirmationToken": "invalid-baseline-token" } }
+  },
+  {
+    "id": "createImportedCluster",
+    "tool": "createImportedCluster",
+    "params": { "name": "baseline-probe-never-create", "confirmationToken": "invalid-baseline-token" },
+    "mapsTo": { "tool": "executeChange", "params": { "operation": "createImportedCluster", "name": "baseline-probe-never-create", "confirmationToken": "invalid-baseline-token" } }
+  },
+  {
+    "id": "createK3kCluster",
+    "tool": "createK3kCluster",
+    "params": { "name": "baseline-probe-never-create", "namespace": "baseline-probe", "targetCluster": "${discovered.cluster}", "mode": "shared", "servers": 1, "agents": 0, "confirmationToken": "invalid-baseline-token" },
+    "mapsTo": { "tool": "executeChange", "params": { "operation": "createK3kCluster", "name": "baseline-probe-never-create", "namespace": "baseline-probe", "targetCluster": "${discovered.cluster}", "mode": "shared", "servers": 1, "agents": 0, "confirmationToken": "invalid-baseline-token" } }
+  }
+]
