@@ -1,32 +1,55 @@
 package toolsets
 
 import (
+	"slices"
 	"strings"
 	"testing"
 
 	"github.com/rancher/rancher-ai-mcp/pkg/toolconfig"
+	"github.com/rancher/rancher-ai-mcp/pkg/toolsets/dispatch"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
 
-// testWriteTools are the mutating tools the strict instructions are built around.
-var testWriteTools = []string{
-	"createKubernetesResource",
-	"patchKubernetesResource",
-	"deleteKubernetesResource",
-	"createProject",
-	"createCustomCluster",
-	"createImportedCluster",
-	"createK3kCluster",
-	"scaleClusterNodePool",
+// expectedChangeOperations returns the operations the safety instructions must
+// announce for cfg: every dispatch.ChangeOperations entry, minus execPod unless
+// --enable-exec turns that operation on. The enum is the source of truth for
+// what planChange/executeChange accept, so deriving the expectation from it is
+// what makes the instructions tests catch an operation renamed or dropped on
+// only one side of the contract.
+func expectedChangeOperations(cfg toolconfig.Config) []string {
+	ops := make([]string, 0, len(dispatch.ChangeOperations))
+	for _, op := range dispatch.ChangeOperations {
+		if op == "execPod" && !cfg.EnableExec {
+			continue
+		}
+		ops = append(ops, op)
+	}
+	return ops
+}
+
+// TestWriteOperationsMatchDispatchEnum pins the operation inventory in
+// instructions.go to the dispatch enum: the two lists must hold the same
+// operations, so adding, renaming or removing an operation enum value without
+// updating the instructions fails here.
+func TestWriteOperationsMatchDispatchEnum(t *testing.T) {
+	assert.ElementsMatch(t, dispatch.ChangeOperations,
+		allWriteOperations(toolconfig.Config{EnableExec: true}),
+		"the announced inventory must be exactly the dispatch operation enum")
+
+	// Without --enable-exec, execPod is the only operation that drops out.
+	without := allWriteOperations(toolconfig.Config{})
+	assert.NotContains(t, without, "execPod", "execPod is announced only with --enable-exec")
+	assert.ElementsMatch(t, expectedChangeOperations(toolconfig.Config{}), without)
 }
 
 func TestInstructionsStrict(t *testing.T) {
 	s := SafetyInstructions(toolconfig.Config{})
-	assert.Contains(t, s, "NEVER call a Write tool")
+	assert.Contains(t, s, "NEVER call executeChange")
 	assert.Contains(t, s, "confirmationToken")
 	assert.Contains(t, s, "deleteKubernetesResource")
 	assert.NotContains(t, s, "execPod") // exec tools are listed only when --enable-exec is on
+	assert.NotContains(t, s, "Write tool")
 }
 
 func TestInstructionsModes(t *testing.T) {
@@ -39,23 +62,56 @@ func TestInstructionsModes(t *testing.T) {
 func TestInstructionsStrictInventory(t *testing.T) {
 	s := SafetyInstructions(toolconfig.Config{})
 
-	// Every always-registered write tool is announced.
-	for _, name := range testWriteTools {
-		assert.Contains(t, s, name, "strict instructions must list %s", name)
+	// Every operation the server accepts is announced.
+	for _, op := range expectedChangeOperations(toolconfig.Config{}) {
+		assert.Contains(t, s, op, "strict instructions must list %s", op)
 	}
 
 	// The seven-step protocol is rendered verbatim, one numbered rule each.
-	for _, rule := range []string{"1. Tools marked as Write", "2. NEVER call a Write tool",
-		"3. ALWAYS call the corresponding Plan tool", "4. After the user approves the plan",
-		"5. Approval NEVER carries over", "6. If the user declines", "7. Prefer read-only tools"} {
+	for _, rule := range []string{"1. The planChange and executeChange tools (operation: ",
+		"2. NEVER call executeChange", "3. ALWAYS call planChange first",
+		"4. After the user approves the plan", "5. Approval NEVER carries over",
+		"6. If the user declines", "7. Prefer read-only tools"} {
 		assert.Contains(t, s, rule, "strict instructions must contain the rule starting with %q", rule)
 	}
 	assert.NotContains(t, s, "AUTO-WRITE")
 }
 
+// TestInstructionsCrossCheckChangeOperations guards the instructions↔registration
+// contract the two-verb surface rests on: every operation the change tools
+// accept must be announced by the safety instructions in both the strict and
+// the auto-write variants, with execPod's presence following --enable-exec.
+// The expectation comes from dispatch.ChangeOperations, so an operation added
+// to (or renamed in) the registered surface without updating the rendered text
+// fails here.
+func TestInstructionsCrossCheckChangeOperations(t *testing.T) {
+	for _, tc := range []struct {
+		name string
+		cfg  toolconfig.Config
+	}{
+		{"strict", toolconfig.Config{}},
+		{"strict+exec", toolconfig.Config{EnableExec: true}},
+		{"autowrite", toolconfig.Config{AutoWrite: true}},
+		{"autowrite+exec", toolconfig.Config{AutoWrite: true, EnableExec: true}},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			s := SafetyInstructions(tc.cfg)
+			for _, op := range dispatch.ChangeOperations {
+				if op == "execPod" && !tc.cfg.EnableExec {
+					assert.NotContains(t, s, op,
+						"%s must not be announced without --enable-exec", op)
+					continue
+				}
+				assert.Contains(t, s, op,
+					"every registered operation must be announced, %s is missing", op)
+			}
+		})
+	}
+}
+
 // TestInstructionsRuleOneWellFormed guards the mechanical shape of rule 1 in
 // every mode: the inventory is opened and closed exactly once, and names each
-// registered write tool exactly once, so a template that drops or duplicates a
+// registered operation exactly once, so a template that drops or duplicates a
 // paren or an entry cannot ship.
 func TestInstructionsRuleOneWellFormed(t *testing.T) {
 	for _, tc := range []struct {
@@ -71,7 +127,7 @@ func TestInstructionsRuleOneWellFormed(t *testing.T) {
 			s := SafetyInstructions(tc.cfg)
 			assert.NotContains(t, s, "))", "rule 1 must not close the inventory twice")
 
-			start := strings.Index(s, "1. Tools marked as Write (")
+			start := strings.Index(s, "1. The planChange and executeChange tools (operation: ")
 			require.GreaterOrEqual(t, start, 0, "rule 1 must be present")
 			rest := s[start:]
 
@@ -87,13 +143,9 @@ func TestInstructionsRuleOneWellFormed(t *testing.T) {
 			inventory := rule1[:strings.Index(rule1, ")")]
 			after := rule1[strings.Index(rule1, ")")+1:]
 			assert.True(t, strings.HasPrefix(after, "\n"), "the inventory close paren must end its line")
-			names := append([]string{}, testWriteTools...)
-			if tc.cfg.EnableExec {
-				names = append(names, "execPod")
-			}
-			for _, name := range names {
-				assert.Equal(t, 1, strings.Count(inventory, name),
-					"tool %s must appear exactly once in rule 1's inventory", name)
+			for _, op := range expectedChangeOperations(tc.cfg) {
+				assert.Equal(t, 1, strings.Count(inventory, op),
+					"operation %s must appear exactly once in rule 1's inventory", op)
 			}
 		})
 	}
@@ -102,8 +154,8 @@ func TestInstructionsRuleOneWellFormed(t *testing.T) {
 func TestInstructionsEnableExecOnlyListsExecPod(t *testing.T) {
 	s := SafetyInstructions(toolconfig.Config{EnableExec: true})
 	assert.Contains(t, s, "execPod")
-	for _, name := range testWriteTools {
-		assert.Contains(t, s, name)
+	for _, op := range expectedChangeOperations(toolconfig.Config{}) {
+		assert.Contains(t, s, op)
 	}
 }
 
@@ -115,9 +167,13 @@ func TestInstructionsReadOnly(t *testing.T) {
 	assert.NotContains(t, s, "AUTO-WRITE")
 	assert.NotContains(t, s, "confirmationToken")
 
-	// No mutating tool may be named in read-only mode.
-	for _, name := range append(testWriteTools, "execPod", "execPodPlan") {
-		assert.NotContains(t, s, name, "read-only instructions must not mention %s", name)
+	// Read-only mode names its five tools and nothing that can mutate.
+	for _, name := range []string{"rancherQuery", "diagnose", "getKubernetesResource",
+		"listKubernetesResources", "listAPIResources"} {
+		assert.Contains(t, s, name, "read-only instructions must name the %s tool", name)
+	}
+	for _, op := range append(slices.Clone(dispatch.ChangeOperations), "execPodPlan") {
+		assert.NotContains(t, s, op, "read-only instructions must not mention %s", op)
 	}
 }
 
@@ -131,38 +187,38 @@ func TestInstructionsAutoWriteStructure(t *testing.T) {
 	s := SafetyInstructions(toolconfig.Config{AutoWrite: true})
 
 	// The auto-write paragraphs are rendered verbatim.
-	assert.Contains(t, s, "2. The server is running in AUTO-WRITE mode: create/update-class tools")
+	assert.Contains(t, s, "2. The server is running in AUTO-WRITE mode: create/update-class operations")
 	assert.Contains(t, s, "execute immediately when you call them")
-	assert.Contains(t, s, "deleteKubernetesResource STILL REQUIRES the full protocol in")
+	assert.Contains(t, s, "3. The deleteKubernetesResource operation STILL REQUIRES the full")
 
 	// The strict rules 5-7 follow, renumbered 4-6.
-	assert.Contains(t, s, "1. Tools marked as Write")
+	assert.Contains(t, s, "1. The planChange and executeChange tools (operation: ")
 	assert.Contains(t, s, "4. Approval NEVER carries over. Every operation that still requires")
 	assert.Contains(t, s, "5. If the user declines")
 	assert.Contains(t, s, "6. Prefer read-only tools")
 
 	// The replaced strict rules are gone.
-	assert.NotContains(t, s, "2. NEVER call a Write tool")
-	assert.NotContains(t, s, "3. ALWAYS call the corresponding Plan tool")
+	assert.NotContains(t, s, "2. NEVER call executeChange")
+	assert.NotContains(t, s, "3. ALWAYS call planChange first")
 	assert.NotContains(t, s, "4. After the user approves the plan")
 }
 
 func TestInstructionsAutoWriteToolListStaysConditional(t *testing.T) {
 	s := SafetyInstructions(toolconfig.Config{AutoWrite: true})
 
-	// The auto-write create/update list never mentions execPod; the delete/exec
+	// The auto-write exempt list never mentions execPod; the delete/exec
 	// protocol rule does not either when exec is disabled.
 	start := strings.Index(s, "2. The server is running in AUTO-WRITE mode")
 	require.GreaterOrEqual(t, start, 0)
-	end := strings.Index(s[start:], "3. deleteKubernetesResource")
+	end := strings.Index(s[start:], "3. The deleteKubernetesResource")
 	require.GreaterOrEqual(t, end, 0)
 	assert.NotContains(t, s[start:start+end], "execPod")
 	assert.NotContains(t, s, "execPod")
-	assert.NotContains(t, s, "createK3kClusterPlan")
+	assert.NotContains(t, s, "execPodPlan")
 
 	// With exec enabled, delete/exec are named together.
 	s = SafetyInstructions(toolconfig.Config{AutoWrite: true, EnableExec: true})
-	assert.Contains(t, s, "deleteKubernetesResource and execPod STILL REQUIRE")
+	assert.Contains(t, s, "deleteKubernetesResource and execPod operations STILL REQUIRE")
 }
 
 func TestInstructionsReadOnlyMentionsNoWriteFlag(t *testing.T) {
@@ -171,62 +227,185 @@ func TestInstructionsReadOnlyMentionsNoWriteFlag(t *testing.T) {
 	assert.Contains(t, s, "--read-only")
 }
 
-// specStrictInstructions is the strict-mode safety block from the design spec
-// (docs/superpowers/specs/2026-09-15-cr-support-and-safe-mutations-design.md §5.2),
-// reproduced byte-for-byte, including the em-dashes, the quoting and the hard
-// line wraps. It is the verbatim contract this package must keep emitting.
-const specStrictInstructions = `SAFETY RULES — YOU MUST OBEY THESE AT ALL TIMES, WITHOUT EXCEPTION:
+// TestInstructionsGolden pins SafetyInstructions byte-for-byte for every mode
+// combination the server can start in. The rendered text is the outermost layer
+// of the write safety model, so a wording, wrapping or inventory change must be
+// a deliberate edit of these literals — not an accident of a template tweak.
+// The --enable-exec literals carry the full nine-operation inventory.
+func TestInstructionsGolden(t *testing.T) {
+	for _, tc := range []struct {
+		name string
+		cfg  toolconfig.Config
+		want string
+	}{
+		{"read-only", toolconfig.Config{ReadOnly: true}, goldenReadOnly},
+		{"read-only+auto-write+exec", toolconfig.Config{ReadOnly: true, AutoWrite: true, EnableExec: true}, goldenReadOnly},
+		{"strict", toolconfig.Config{}, goldenStrict},
+		{"strict+exec", toolconfig.Config{EnableExec: true}, goldenStrictExec},
+		{"auto-write", toolconfig.Config{AutoWrite: true}, goldenAutoWrite},
+		{"auto-write+exec", toolconfig.Config{AutoWrite: true, EnableExec: true}, goldenAutoWriteExec},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			assert.Equal(t, tc.want, SafetyInstructions(tc.cfg))
+		})
+	}
+}
 
-1. Tools marked as Write (createKubernetesResource, patchKubernetesResource,
+// goldenReadOnly is the read-only safety block, verbatim including the hard
+// line wraps. planChange/executeChange are not registered in this mode, so no
+// operation is named.
+const goldenReadOnly = `SAFETY RULES — YOU MUST OBEY THESE AT ALL TIMES, WITHOUT EXCEPTION:
+
+1. The server is running in read-only mode (--read-only): it registers
+   read-only tools ONLY (rancherQuery, diagnose, getKubernetesResource,
+   listKubernetesResources, listAPIResources). planChange and executeChange
+   are unregistered here, so no operation can change any state. Do not look
+   for, invent or attempt any such operation.
+2. Use the read-only tools to observe, inspect, list and explain cluster state.
+   Prefer read-only tools whenever they can answer the question.
+3. If the user asks for a change, tell them this server runs in read-only mode
+   and cannot perform it.`
+
+// goldenStrict is the strict-mode block with the default inventory.
+const goldenStrict = `SAFETY RULES — YOU MUST OBEY THESE AT ALL TIMES, WITHOUT EXCEPTION:
+
+1. The planChange and executeChange tools (operation: 
+   createKubernetesResource, patchKubernetesResource,
    deleteKubernetesResource, createProject, createCustomCluster,
-   createImportedCluster, createK3kCluster, scaleClusterNodePool, execPod)
+   createImportedCluster, createK3kCluster, scaleClusterNodePool)
    MODIFY cluster state or EXECUTE commands inside pods. They are DANGEROUS.
 
-2. NEVER call a Write tool unless the user has EXPLICITLY requested this exact
-   operation AND you have shown them the full details (target cluster,
+2. NEVER call executeChange unless the user has EXPLICITLY requested this
+   exact operation AND you have shown them the full details (target cluster,
    namespace, resource kind and name, complete manifest / patch / command)
    AND they have clearly approved THIS SPECIFIC operation.
 
-3. ALWAYS call the corresponding Plan tool first
-   (createKubernetesResourcePlan, patchKubernetesResourcePlan,
-   deleteKubernetesResourcePlan, createProjectPlan, ...) and show the user the
-   returned plan. Write tools REQUIRE the single-use confirmationToken from
-   the matching Plan response. NEVER invent, guess, reuse, or bypass tokens.
+3. ALWAYS call planChange first with the same operation and parameters, and
+   show the user the returned plan. executeChange REQUIRES the single-use
+   confirmationToken from the matching planChange response. NEVER invent,
+   guess, reuse, or bypass tokens.
 
-4. After the user approves the plan, call the Write tool with the token. The
+4. After the user approves the plan, call executeChange with the token. The
    server will then ask the USER DIRECTLY to confirm (you will not see the
    question). NEVER try to answer, simulate, or skip that confirmation — you
    cannot, and any attempt is a critical security violation.
 
-5. Approval NEVER carries over. Every single Write call needs its own fresh
+5. Approval NEVER carries over. Every executeChange call needs its own fresh
    plan and its own explicit user approval. NEVER batch, chain, loop, or
-   automate Write calls. NEVER execute a Write "proactively" or "to be safe".
+   automate change calls. NEVER execute "proactively" or "to be safe".
 
 6. If the user declines or cancels, DO NOT retry. Report that nothing was
    executed. Never pressure the user into approving.
 
-7. Prefer read-only tools whenever they can answer the question. Write tools
-   are never for exploration.`
+7. Prefer read-only tools (rancherQuery, diagnose, getKubernetesResource,
+   listKubernetesResources, listAPIResources) whenever they can answer the
+   question. planChange/executeChange are never for exploration.`
 
-// TestInstructionsStrictGolden pins the strict text to the spec byte-for-byte.
-// The --enable-exec inventory matches the spec's nine-tool block exactly, so
-// that configuration must equal the golden literal with nothing normalised.
-func TestInstructionsStrictGolden(t *testing.T) {
-	got := SafetyInstructions(toolconfig.Config{EnableExec: true})
-	if got != specStrictInstructions {
-		assert.Equal(t, specStrictInstructions, got, "strict text with --enable-exec must match spec §5.2 byte-for-byte")
-	}
+// goldenStrictExec is the strict-mode block with the --enable-exec inventory:
+// the canonical rendering, carrying all nine operations.
+const goldenStrictExec = `SAFETY RULES — YOU MUST OBEY THESE AT ALL TIMES, WITHOUT EXCEPTION:
 
-	// The default configuration registers the same tools minus execPod, so its
-	// rendering is the golden literal with that one inventory entry removed.
-	// The spec hard-wraps the nine-tool list across three lines; dropping one
-	// tool reflows the tail, so the normalisation is expressed on the rendered
-	// tool list only (rule 1), leaving rules 2-7 under the byte-exact check.
-	want := strings.Replace(specStrictInstructions,
-		"   createImportedCluster, createK3kCluster, scaleClusterNodePool, execPod)",
-		"   createImportedCluster, createK3kCluster, scaleClusterNodePool)", 1)
-	got = SafetyInstructions(toolconfig.Config{})
-	if got != want {
-		assert.Equal(t, want, got, "default strict text must match spec §5.2 minus the execPod inventory entry")
-	}
-}
+1. The planChange and executeChange tools (operation: 
+   createKubernetesResource, patchKubernetesResource,
+   deleteKubernetesResource, createProject, createCustomCluster,
+   createImportedCluster, createK3kCluster, scaleClusterNodePool, execPod)
+   MODIFY cluster state or EXECUTE commands inside pods. They are DANGEROUS.
+
+2. NEVER call executeChange unless the user has EXPLICITLY requested this
+   exact operation AND you have shown them the full details (target cluster,
+   namespace, resource kind and name, complete manifest / patch / command)
+   AND they have clearly approved THIS SPECIFIC operation.
+
+3. ALWAYS call planChange first with the same operation and parameters, and
+   show the user the returned plan. executeChange REQUIRES the single-use
+   confirmationToken from the matching planChange response. NEVER invent,
+   guess, reuse, or bypass tokens.
+
+4. After the user approves the plan, call executeChange with the token. The
+   server will then ask the USER DIRECTLY to confirm (you will not see the
+   question). NEVER try to answer, simulate, or skip that confirmation — you
+   cannot, and any attempt is a critical security violation.
+
+5. Approval NEVER carries over. Every executeChange call needs its own fresh
+   plan and its own explicit user approval. NEVER batch, chain, loop, or
+   automate change calls. NEVER execute "proactively" or "to be safe".
+
+6. If the user declines or cancels, DO NOT retry. Report that nothing was
+   executed. Never pressure the user into approving.
+
+7. Prefer read-only tools (rancherQuery, diagnose, getKubernetesResource,
+   listKubernetesResources, listAPIResources) whenever they can answer the
+   question. planChange/executeChange are never for exploration.`
+
+// goldenAutoWrite is the auto-write block with the default inventory: the
+// non-exempt operations may execute immediately, deleteKubernetesResource stays
+// fully gated.
+const goldenAutoWrite = `SAFETY RULES — YOU MUST OBEY THESE AT ALL TIMES, WITHOUT EXCEPTION:
+
+This server is running in auto-write mode (--allow-auto-write): the operator
+explicitly allowed create/update-class operations to execute without
+per-operation user confirmation. delete and exec operations are NOT exempt.
+
+1. The planChange and executeChange tools (operation: 
+   createKubernetesResource, patchKubernetesResource,
+   deleteKubernetesResource, createProject, createCustomCluster,
+   createImportedCluster, createK3kCluster, scaleClusterNodePool)
+   MODIFY cluster state or EXECUTE commands inside pods. They are DANGEROUS.
+
+2. The server is running in AUTO-WRITE mode: create/update-class operations
+   (operation: createKubernetesResource, patchKubernetesResource,
+   createProject, createCustomCluster, createImportedCluster, createK3kCluster,
+   scaleClusterNodePool) execute immediately when you call them. Even so,
+   only call them when the user has asked for the operation.
+3. The deleteKubernetesResource operation STILL REQUIRES the full
+   protocol in ALL modes: planChange first, explicit user approval for the
+   exact operation, confirmationToken, and a server-initiated user
+   confirmation (typed resource name included).
+
+4. Approval NEVER carries over. Every operation that still requires
+   confirmation needs its own fresh plan and its own explicit user approval.
+   NEVER batch, chain, loop, or automate them. NEVER execute "proactively"
+   or "to be safe".
+
+5. If the user declines or cancels, DO NOT retry. Report that nothing was
+   executed. Never pressure the user into approving.
+
+6. Prefer read-only tools (rancherQuery, diagnose, getKubernetesResource,
+   listKubernetesResources, listAPIResources) whenever they can answer the
+   question. planChange/executeChange are never for exploration.`
+
+// goldenAutoWriteExec is the auto-write block with --enable-exec, where
+// execPod joins deleteKubernetesResource as a fully gated operation.
+const goldenAutoWriteExec = `SAFETY RULES — YOU MUST OBEY THESE AT ALL TIMES, WITHOUT EXCEPTION:
+
+This server is running in auto-write mode (--allow-auto-write): the operator
+explicitly allowed create/update-class operations to execute without
+per-operation user confirmation. delete and exec operations are NOT exempt.
+
+1. The planChange and executeChange tools (operation: 
+   createKubernetesResource, patchKubernetesResource,
+   deleteKubernetesResource, createProject, createCustomCluster,
+   createImportedCluster, createK3kCluster, scaleClusterNodePool, execPod)
+   MODIFY cluster state or EXECUTE commands inside pods. They are DANGEROUS.
+
+2. The server is running in AUTO-WRITE mode: create/update-class operations
+   (operation: createKubernetesResource, patchKubernetesResource,
+   createProject, createCustomCluster, createImportedCluster, createK3kCluster,
+   scaleClusterNodePool) execute immediately when you call them. Even so,
+   only call them when the user has asked for the operation.
+3. The deleteKubernetesResource and execPod operations STILL REQUIRE the
+   full protocol in ALL modes: planChange first, explicit user approval
+   for the exact operation, confirmationToken, and a server-initiated
+   user confirmation (delete additionally requires the typed name).
+
+4. Approval NEVER carries over. Every operation that still requires
+   confirmation needs its own fresh plan and its own explicit user approval.
+   NEVER batch, chain, loop, or automate them. NEVER execute "proactively"
+   or "to be safe".
+
+5. If the user declines or cancels, DO NOT retry. Report that nothing was
+   executed. Never pressure the user into approving.
+
+6. Prefer read-only tools (rancherQuery, diagnose, getKubernetesResource,
+   listKubernetesResources, listAPIResources) whenever they can answer the
+   question. planChange/executeChange are never for exploration.`

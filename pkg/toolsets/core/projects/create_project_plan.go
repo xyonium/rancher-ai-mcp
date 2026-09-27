@@ -42,7 +42,7 @@ func (t *Tools) createProjectPlan(_ context.Context, _ *mcp.CallToolRequest, par
 	mcpResponse, err := response.CreatePlanResponse([]response.PlanResource{createResource}, &response.Confirmation{
 		Token:     token,
 		ExpiresAt: time.Now().Add(t.cfg.Gate.TokenTTL).UTC(),
-		Note:      "Show this plan to the user. Only after their explicit approval, call createProject with this confirmationToken. The token is single-use and expires in 10 minutes.",
+		Note:      "Show this plan to the user. Only after their explicit approval, call executeChange with operation=createProject and this confirmationToken. The token is single-use and expires in 10 minutes.",
 	})
 	if err != nil {
 		zap.L().Error("failed to create plan response", zap.String("tool", "createProject_plan"), zap.Error(err))

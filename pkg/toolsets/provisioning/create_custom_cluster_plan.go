@@ -47,7 +47,7 @@ func (t *Tools) createCustomClusterPlan(_ context.Context, toolReq *mcp.CallTool
 	mcpResponse, err := response.CreatePlanResponse([]response.PlanResource{createResource}, &response.Confirmation{
 		Token:     token,
 		ExpiresAt: time.Now().Add(t.cfg.Gate.TokenTTL).UTC(),
-		Note:      "Show this plan to the user. Only after their explicit approval, call createCustomCluster with this confirmationToken. The token is single-use and expires in 10 minutes.",
+		Note:      "Show this plan to the user. Only after their explicit approval, call executeChange with operation=createCustomCluster and this confirmationToken. The token is single-use and expires in 10 minutes.",
 	})
 	if err != nil {
 		zap.L().Error("failed to create plan response", zap.Error(err))

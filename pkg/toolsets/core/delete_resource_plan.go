@@ -60,7 +60,7 @@ func (t *Tools) deleteKubernetesResourcePlan(ctx context.Context, _ *mcp.CallToo
 	plan, err := response.CreatePlanResponse([]response.PlanResource{planResource}, &response.Confirmation{
 		Token:     token,
 		ExpiresAt: time.Now().Add(t.cfg.Gate.TokenTTL).UTC(),
-		Note:      "Show the user the resource that WILL BE PERMANENTLY DELETED. Only after their explicit approval call deleteKubernetesResource with this confirmationToken. The user will be asked to type the resource name to confirm. The token is single-use and expires in 10 minutes.",
+		Note:      "Show the user the resource that WILL BE PERMANENTLY DELETED. Only after their explicit approval call executeChange with operation=deleteKubernetesResource and this confirmationToken. The user will be asked to type the resource name to confirm. The token is single-use and expires in 10 minutes.",
 	})
 	if err != nil {
 		zap.L().Error("failed to create plan response", zap.String("tool", "deleteKubernetesResource_plan"), zap.Error(err))

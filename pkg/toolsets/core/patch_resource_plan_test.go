@@ -316,6 +316,8 @@ func TestUpdateKubernetesResourcePlanToken(t *testing.T) {
 	}
 	require.NoError(t, json.Unmarshal([]byte(result.Content[0].(*mcp.TextContent).Text), &parsed))
 	require.NotEmpty(t, parsed.Confirmation.Token, "plan response must carry a confirmationToken")
+	assert.Contains(t, parsed.Confirmation.Note, "executeChange with operation=patchKubernetesResource",
+		"the plan note must direct the agent to the executeChange operation, not a deleted tool")
 	require.Len(t, parsed.Plan, 1)
 	assert.Equal(t, "update", string(parsed.Plan[0].Type))
 	assert.Equal(t, "test-config", parsed.Plan[0].Resource.Name)
