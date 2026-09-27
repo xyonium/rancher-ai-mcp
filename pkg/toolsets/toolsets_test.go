@@ -7,7 +7,6 @@ import (
 	"net"
 	"net/http"
 	"sort"
-	"strings"
 	"testing"
 	"time"
 
@@ -18,22 +17,50 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-func TestAllToolSets(t *testing.T) {
-	c, err := client.NewClient(true, "https://fake-url")
-	require.NoError(t, err)
-	toolsets := allToolSets(c, toolconfig.Config{})
+// allToolsNames is the merged surface AddAllTools must delegate to: the 3
+// k8s-generic tools, rancherQuery and diagnose, plus — outside read-only mode —
+// planChange and executeChange. The 7/5 invariants themselves live in
+// pkg/toolsets/merged; these tests pin the delegation and the write-tool
+// contract at the package boundary the server entry point uses.
+var allToolsNames = []string{"diagnose", "executeChange", "getKubernetesResource", "listAPIResources", "listKubernetesResources", "planChange", "rancherQuery"}
 
-	assert.NotNil(t, toolsets)
-	assert.Len(t, toolsets, 3, "should have exactly 3 toolsets (core, fleet, and provisioning)")
+// TestAddAllToolsDelegatesToMerged proves the single registration entry point
+// still adds the whole consolidated surface: toolsets.AddAllTools must not
+// drift from merged.Register.
+func TestAddAllToolsDelegatesToMerged(t *testing.T) {
+	for _, tc := range []struct {
+		name string
+		cfg  toolconfig.Config
+		want []string
+	}{
+		{"full", toolconfig.Config{}, allToolsNames},
+		{"enable-exec", toolconfig.Config{EnableExec: true}, allToolsNames},
+		{"read-only", toolconfig.Config{ReadOnly: true}, []string{"diagnose", "getKubernetesResource", "listAPIResources", "listKubernetesResources", "rancherQuery"}},
+		{"read-only+exec", toolconfig.Config{ReadOnly: true, EnableExec: true}, []string{"diagnose", "getKubernetesResource", "listAPIResources", "listKubernetesResources", "rancherQuery"}},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			registered := listAllRegisteredTools(t, tc.cfg)
+			got := make([]string, 0, len(registered))
+			for name := range registered {
+				got = append(got, name)
+			}
+			sort.Strings(got)
+			want := append([]string{}, tc.want...)
+			sort.Strings(want)
+			assert.Equal(t, want, got)
+		})
+	}
 }
 
 // TestWriteToolInventoryMatchesRegistration guards the cross-task invariant
-// that the writeTools inventory in instructions.go is exactly the set of
-// mutating tools the server really registers. A renamed or freshly added write
-// tool that is missing from (or stale in) the inventory fails here, so the
-// safety instructions can never advertise a tool set that does not match the
-// wire. Tool access is read off the MCP annotations, the same signal TOOLS.md
-// uses to mark a tool as Write.
+// that the safety instructions never advertise more than the server registers.
+// In the merged surface the only non-read-only tools are planChange and
+// executeChange: every mutating operation is an enum value inside them, so a
+// write tool that appears here but is not one of the two change tools (or vice
+// versa) fails this test.
+//
+// The operation inventory itself is checked against the registered change tools
+// by the instructions tests, which own the rendered text.
 func TestWriteToolInventoryMatchesRegistration(t *testing.T) {
 	for _, tc := range []struct {
 		name string
@@ -48,67 +75,38 @@ func TestWriteToolInventoryMatchesRegistration(t *testing.T) {
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			registered := listAllRegisteredTools(t, tc.cfg)
+			got := registeredWriteTools(registered)
 
 			if tc.cfg.ReadOnly {
-				// Read-only mode registers mutating tools ONLY. allWriteTools
-				// deliberately still names the inventory, so the comparison is
-				// against the empty set here.
-				assert.Empty(t, registeredWriteTools(registered),
-					"read-only mode must register no write tool")
+				// Read-only mode registers no mutating tool at all: both change
+				// tools are unregistered, so no operation can be planned or
+				// executed.
+				assert.Empty(t, got, "read-only mode must register no write tool")
 				return
 			}
 
-			want := append([]string{}, allWriteTools(tc.cfg)...)
-			// The plan tools are mutating too (they mint tokens) and the exec
-			// plan tool exists only with EnableExec; both are write-annotated
-			// and none of them is exempt from the inventory check.
-			want = append(want,
-				"createKubernetesResourcePlan",
-				"patchKubernetesResourcePlan",
-				"deleteKubernetesResourcePlan",
-				"createProjectPlan",
-				"createCustomClusterPlan",
-				"createImportedClusterPlan",
-				"createK3kClusterPlan",
-				"scaleClusterNodePoolPlan",
-			)
-			if tc.cfg.EnableExec {
-				want = append(want, "execPodPlan")
-			}
-			sort.Strings(want)
-
-			assert.Equal(t, want, registeredWriteTools(registered),
-				"the registered write tools must equal the instructions inventory plus the plan tools")
+			assert.Equal(t, []string{"executeChange", "planChange"}, got,
+				"the only mutating tools are the two merged change tools")
 		})
 	}
 }
 
-// TestExecToolPairRegistration pins that --enable-exec adds exactly the exec
-// pair and nothing else, and that read-only mode still wins over it.
-func TestExecToolPairRegistration(t *testing.T) {
-	for _, tc := range []struct {
-		name string
-		cfg  toolconfig.Config
-	}{
-		{"enable-exec", toolconfig.Config{EnableExec: true}},
-		{"enable-exec+auto-write", toolconfig.Config{EnableExec: true, AutoWrite: true}},
-		{"enable-exec+read-only", toolconfig.Config{EnableExec: true, ReadOnly: true}},
-	} {
-		t.Run(tc.name, func(t *testing.T) {
-			registered := listAllRegisteredTools(t, tc.cfg)
-			execTools := []string{}
-			for _, name := range registeredWriteTools(registered) {
-				if strings.HasPrefix(name, "execPod") {
-					execTools = append(execTools, name)
-				}
-			}
-			if tc.cfg.ReadOnly {
-				assert.Empty(t, execTools, "read-only mode wins over EnableExec")
-				return
-			}
-			assert.Equal(t, []string{"execPod", "execPodPlan"}, execTools,
-				"EnableExec must register exactly the exec pair")
-		})
+// TestEnableExecDoesNotChangeToolSet pins that --enable-exec is a runtime,
+// per-operation gate now: the tool surface is identical with and without it,
+// and the execPod operation is refused inside executeChange instead. Read-only
+// mode still wins over both.
+func TestEnableExecDoesNotChangeToolSet(t *testing.T) {
+	without := listAllRegisteredTools(t, toolconfig.Config{})
+	with := listAllRegisteredTools(t, toolconfig.Config{EnableExec: true})
+
+	assert.Len(t, with, len(without), "--enable-exec must not add a tool to the merged surface")
+	for name := range without {
+		assert.Contains(t, with, name, "%s must stay registered with --enable-exec", name)
+	}
+
+	readOnly := listAllRegisteredTools(t, toolconfig.Config{EnableExec: true, ReadOnly: true})
+	for _, name := range []string{"planChange", "executeChange", "execPod", "execPodPlan"} {
+		assert.NotContains(t, readOnly, name, "%s must not be registered in read-only mode", name)
 	}
 }
 

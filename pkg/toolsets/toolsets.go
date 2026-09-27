@@ -4,27 +4,12 @@ import (
 	"github.com/modelcontextprotocol/go-sdk/mcp"
 	"github.com/rancher/rancher-ai-mcp/pkg/client"
 	"github.com/rancher/rancher-ai-mcp/pkg/toolconfig"
-	"github.com/rancher/rancher-ai-mcp/pkg/toolsets/core"
-	"github.com/rancher/rancher-ai-mcp/pkg/toolsets/fleet"
-	"github.com/rancher/rancher-ai-mcp/pkg/toolsets/provisioning"
+	"github.com/rancher/rancher-ai-mcp/pkg/toolsets/merged"
 )
 
-// toolsAdder is an interface for types that can add tools to an MCP server.
-type toolsAdder interface {
-	AddTools(mcpServer *mcp.Server)
-}
-
-// AddAllTools adds all available tools to the MCP server.
+// AddAllTools adds all available tools to the MCP server. The merged package is
+// the only registration surface: it registers the 3 k8s-generic tools plus the
+// 4 enum-dispatched merged tools (5 tools in read-only mode).
 func AddAllTools(client *client.Client, mcpServer *mcp.Server, cfg toolconfig.Config) {
-	for _, ta := range allToolSets(client, cfg) {
-		ta.AddTools(mcpServer)
-	}
-}
-
-func allToolSets(client *client.Client, cfg toolconfig.Config) []toolsAdder {
-	return []toolsAdder{
-		core.NewTools(client, cfg),
-		fleet.NewTools(client),
-		provisioning.NewTools(client, cfg),
-	}
+	merged.Register(client, mcpServer, cfg)
 }

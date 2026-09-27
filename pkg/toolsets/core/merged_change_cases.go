@@ -6,6 +6,7 @@ import (
 	"errors"
 
 	"github.com/modelcontextprotocol/go-sdk/mcp"
+	"github.com/rancher/rancher-ai-mcp/pkg/toolsets/core/projects"
 	"github.com/rancher/rancher-ai-mcp/pkg/toolsets/dispatch"
 )
 
@@ -70,80 +71,89 @@ func execGated(t *Tools, fn func() (*mcp.CallToolResult, any, error)) (*mcp.Call
 	return fn()
 }
 
-// PlanCases returns core's slice of the planChange dispatch table. The plan
-// handlers ignore ConfirmationToken (they issue one) and never touch the client
-// state, so mapping it through is harmless and keeps one converter per
-// operation for both phases.
+// PlanCases returns the planChange dispatch table owned by the rancher core
+// toolset: core's own change cases unioned with the projects sub-toolset's
+// createProject. The plan handlers ignore ConfirmationToken (they issue one)
+// and never touch the client state, so mapping it through is harmless and
+// keeps one converter per operation for both phases.
 func (t *Tools) PlanCases() map[string]dispatch.Case[dispatch.ChangeParams] {
-	return map[string]dispatch.Case[dispatch.ChangeParams]{
-		"createKubernetesResource": {
-			Required: []string{"cluster", "kind", "name", "manifest"},
-			Handler: func(ctx context.Context, req *mcp.CallToolRequest, p dispatch.ChangeParams) (*mcp.CallToolResult, any, error) {
-				return t.createKubernetesResourcePlan(ctx, req, createParams(p))
+	return dispatch.MergeMaps(
+		map[string]dispatch.Case[dispatch.ChangeParams]{
+			"createKubernetesResource": {
+				Required: []string{"cluster", "kind", "name", "manifest"},
+				Handler: func(ctx context.Context, req *mcp.CallToolRequest, p dispatch.ChangeParams) (*mcp.CallToolResult, any, error) {
+					return t.createKubernetesResourcePlan(ctx, req, createParams(p))
+				},
+			},
+			"patchKubernetesResource": {
+				Required: []string{"cluster", "kind", "name", "patch"},
+				Handler: func(ctx context.Context, req *mcp.CallToolRequest, p dispatch.ChangeParams) (*mcp.CallToolResult, any, error) {
+					pl, err := patchList(p.Patch)
+					if err != nil {
+						return nil, nil, err
+					}
+					return t.updateKubernetesResourcePlan(ctx, req, updateParams(p, pl))
+				},
+			},
+			"deleteKubernetesResource": {
+				Required: []string{"cluster", "kind", "name"},
+				Handler: func(ctx context.Context, req *mcp.CallToolRequest, p dispatch.ChangeParams) (*mcp.CallToolResult, any, error) {
+					return t.deleteKubernetesResourcePlan(ctx, req, deleteParams(p))
+				},
+			},
+			"execPod": {
+				Required: []string{"cluster", "namespace", "name", "command"},
+				Handler: func(ctx context.Context, req *mcp.CallToolRequest, p dispatch.ChangeParams) (*mcp.CallToolResult, any, error) {
+					return execGated(t, func() (*mcp.CallToolResult, any, error) {
+						return t.execPodPlan(ctx, req, execParams(p))
+					})
+				},
 			},
 		},
-		"patchKubernetesResource": {
-			Required: []string{"cluster", "kind", "name", "patch"},
-			Handler: func(ctx context.Context, req *mcp.CallToolRequest, p dispatch.ChangeParams) (*mcp.CallToolResult, any, error) {
-				pl, err := patchList(p.Patch)
-				if err != nil {
-					return nil, nil, err
-				}
-				return t.updateKubernetesResourcePlan(ctx, req, updateParams(p, pl))
-			},
-		},
-		"deleteKubernetesResource": {
-			Required: []string{"cluster", "kind", "name"},
-			Handler: func(ctx context.Context, req *mcp.CallToolRequest, p dispatch.ChangeParams) (*mcp.CallToolResult, any, error) {
-				return t.deleteKubernetesResourcePlan(ctx, req, deleteParams(p))
-			},
-		},
-		"execPod": {
-			Required: []string{"cluster", "namespace", "name", "command"},
-			Handler: func(ctx context.Context, req *mcp.CallToolRequest, p dispatch.ChangeParams) (*mcp.CallToolResult, any, error) {
-				return execGated(t, func() (*mcp.CallToolResult, any, error) {
-					return t.execPodPlan(ctx, req, execParams(p))
-				})
-			},
-		},
-	}
+		projects.NewTools(t.client, t.cfg).PlanCases(),
+	)
 }
 
-// ExecuteCases returns core's slice of the executeChange dispatch table.
-// The handlers are the unchanged gated handlers: they validate the token
-// against Operation{Tool: <operation name>} and run the user confirmation.
-// ConfirmationToken is forwarded verbatim — the gate is the safety mechanism.
+// ExecuteCases returns the executeChange dispatch table owned by the rancher
+// core toolset: core's own change cases unioned with the projects
+// sub-toolset's createProject. The handlers are the unchanged gated handlers:
+// they validate the token against Operation{Tool: <operation name>} and run
+// the user confirmation. ConfirmationToken is forwarded verbatim — the gate is
+// the safety mechanism.
 func (t *Tools) ExecuteCases() map[string]dispatch.Case[dispatch.ChangeParams] {
-	return map[string]dispatch.Case[dispatch.ChangeParams]{
-		"createKubernetesResource": {
-			Required: []string{"cluster", "kind", "name", "manifest"},
-			Handler: func(ctx context.Context, req *mcp.CallToolRequest, p dispatch.ChangeParams) (*mcp.CallToolResult, any, error) {
-				return t.createKubernetesResource(ctx, req, createParams(p))
+	return dispatch.MergeMaps(
+		map[string]dispatch.Case[dispatch.ChangeParams]{
+			"createKubernetesResource": {
+				Required: []string{"cluster", "kind", "name", "manifest"},
+				Handler: func(ctx context.Context, req *mcp.CallToolRequest, p dispatch.ChangeParams) (*mcp.CallToolResult, any, error) {
+					return t.createKubernetesResource(ctx, req, createParams(p))
+				},
+			},
+			"patchKubernetesResource": {
+				Required: []string{"cluster", "kind", "name", "patch"},
+				Handler: func(ctx context.Context, req *mcp.CallToolRequest, p dispatch.ChangeParams) (*mcp.CallToolResult, any, error) {
+					pl, err := patchList(p.Patch)
+					if err != nil {
+						return nil, nil, err
+					}
+					return t.updateKubernetesResource(ctx, req, updateParams(p, pl))
+				},
+			},
+			"deleteKubernetesResource": {
+				Required: []string{"cluster", "kind", "name"},
+				Handler: func(ctx context.Context, req *mcp.CallToolRequest, p dispatch.ChangeParams) (*mcp.CallToolResult, any, error) {
+					return t.deleteKubernetesResource(ctx, req, deleteParams(p))
+				},
+			},
+			"execPod": {
+				Required: []string{"cluster", "namespace", "name", "command"},
+				Handler: func(ctx context.Context, req *mcp.CallToolRequest, p dispatch.ChangeParams) (*mcp.CallToolResult, any, error) {
+					return execGated(t, func() (*mcp.CallToolResult, any, error) {
+						return t.execPod(ctx, req, execParams(p))
+					})
+				},
 			},
 		},
-		"patchKubernetesResource": {
-			Required: []string{"cluster", "kind", "name", "patch"},
-			Handler: func(ctx context.Context, req *mcp.CallToolRequest, p dispatch.ChangeParams) (*mcp.CallToolResult, any, error) {
-				pl, err := patchList(p.Patch)
-				if err != nil {
-					return nil, nil, err
-				}
-				return t.updateKubernetesResource(ctx, req, updateParams(p, pl))
-			},
-		},
-		"deleteKubernetesResource": {
-			Required: []string{"cluster", "kind", "name"},
-			Handler: func(ctx context.Context, req *mcp.CallToolRequest, p dispatch.ChangeParams) (*mcp.CallToolResult, any, error) {
-				return t.deleteKubernetesResource(ctx, req, deleteParams(p))
-			},
-		},
-		"execPod": {
-			Required: []string{"cluster", "namespace", "name", "command"},
-			Handler: func(ctx context.Context, req *mcp.CallToolRequest, p dispatch.ChangeParams) (*mcp.CallToolResult, any, error) {
-				return execGated(t, func() (*mcp.CallToolResult, any, error) {
-					return t.execPod(ctx, req, execParams(p))
-				})
-			},
-		},
-	}
+		projects.NewTools(t.client, t.cfg).ExecuteCases(),
+	)
 }

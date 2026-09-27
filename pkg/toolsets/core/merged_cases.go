@@ -4,23 +4,33 @@ import (
 	"context"
 
 	"github.com/modelcontextprotocol/go-sdk/mcp"
+	"github.com/rancher/rancher-ai-mcp/pkg/toolsets/core/projects"
+	"github.com/rancher/rancher-ai-mcp/pkg/toolsets/core/rbac"
 	"github.com/rancher/rancher-ai-mcp/pkg/toolsets/dispatch"
 )
 
-// QueryCases returns core's slice of the rancherQuery dispatch table.
+// QueryCases returns the rancherQuery dispatch table owned by the rancher core
+// toolset: core's own cases unioned with the projects and rbac sub-toolsets.
+// The sub-toolsets have no separate registration surface any more, so core is
+// their home in the merged table. MergeMaps panics on a duplicate key, so a
+// case owned by two toolsets is a registration-time failure.
 func (t *Tools) QueryCases() map[string]dispatch.Case[dispatch.QueryParams] {
-	return map[string]dispatch.Case[dispatch.QueryParams]{
-		"clusters": {
-			Handler: func(ctx context.Context, req *mcp.CallToolRequest, p dispatch.QueryParams) (*mcp.CallToolResult, any, error) {
-				return t.listClusters(ctx, req, struct{}{})
+	return dispatch.MergeMaps(
+		map[string]dispatch.Case[dispatch.QueryParams]{
+			"clusters": {
+				Handler: func(ctx context.Context, req *mcp.CallToolRequest, p dispatch.QueryParams) (*mcp.CallToolResult, any, error) {
+					return t.listClusters(ctx, req, struct{}{})
+				},
+			},
+			"clusterImages": {
+				Handler: func(ctx context.Context, req *mcp.CallToolRequest, p dispatch.QueryParams) (*mcp.CallToolResult, any, error) {
+					return t.getClusterImages(ctx, req, getClusterImagesParams{Clusters: p.Clusters})
+				},
 			},
 		},
-		"clusterImages": {
-			Handler: func(ctx context.Context, req *mcp.CallToolRequest, p dispatch.QueryParams) (*mcp.CallToolResult, any, error) {
-				return t.getClusterImages(ctx, req, getClusterImagesParams{Clusters: p.Clusters})
-			},
-		},
-	}
+		projects.NewTools(t.client, t.cfg).QueryCases(),
+		rbac.NewTools(t.client, t.cfg.ReadOnly).QueryCases(),
+	)
 }
 
 // DiagnoseCases returns core's slice of the diagnose dispatch table.

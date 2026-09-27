@@ -1,10 +1,23 @@
 package provisioning
 
 import (
+	"context"
+	"encoding/json"
 	"testing"
 
+	"github.com/modelcontextprotocol/go-sdk/mcp"
+	"github.com/rancher/rancher-ai-mcp/internal/middleware"
+	"github.com/rancher/rancher-ai-mcp/pkg/client"
 	"github.com/rancher/rancher-ai-mcp/pkg/toolconfig"
 	"github.com/rancher/rancher-ai-mcp/pkg/toolsets/dispatch"
+	provisioningV1 "github.com/rancher/rancher/pkg/apis/provisioning.cattle.io/v1"
+	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
+	"k8s.io/client-go/dynamic"
+	dynamicfake "k8s.io/client-go/dynamic/fake"
+	"k8s.io/client-go/kubernetes"
+	"k8s.io/client-go/rest"
+	"k8s.io/utils/ptr"
 )
 
 // testCfg builds the config the merged-case tests need: a fake gate, so the
@@ -109,4 +122,123 @@ func TestScaleParamsMapping(t *testing.T) {
 	if got != want {
 		t.Errorf("scaleParams = %+v, want %+v", got, want)
 	}
+}
+
+// TestConverterIdentityFieldMapping pins the identity-bearing fields of every
+// provisioning converter field-by-field. The converters were proven
+// mutation-sensitive by review, so each struct is compared whole: a transposed
+// or dropped assignment (Namespace↔TargetCluster, CNI↔Version, ...) fails.
+func TestConverterIdentityFieldMapping(t *testing.T) {
+	t.Run("custom cluster", func(t *testing.T) {
+		got := customClusterParams(dispatch.ChangeParams{
+			Name: "custom", Description: "desc", CNI: "calico", Version: "v1.33.1+rke2r1", Distribution: "rke2",
+		})
+		want := createCustomClusterParams{
+			Name: "custom", Description: "desc", CNI: "calico", Version: "v1.33.1+rke2r1", Distribution: "rke2",
+		}
+		if got != want {
+			t.Errorf("customClusterParams = %+v, want %+v", got, want)
+		}
+	})
+
+	t.Run("imported cluster", func(t *testing.T) {
+		got := importedClusterParams(dispatch.ChangeParams{
+			Name: "imported", Description: "desc", VersionManagementSetting: "false",
+		})
+		want := createImportedClusterParams{
+			Name: "imported", Description: "desc", VersionManagementSetting: "false",
+		}
+		if got != want {
+			t.Errorf("importedClusterParams = %+v, want %+v", got, want)
+		}
+	})
+
+	t.Run("k3k cluster identity", func(t *testing.T) {
+		// Namespace and TargetCluster are distinct fields that a transposition
+		// would swap; Name/Version are the other identity strings.
+		got := k3kClusterParams(dispatch.ChangeParams{
+			Name: "k3k", Namespace: "k3k-ns", TargetCluster: "down",
+			Version: "v1.33.1-k3s1", Mode: "virtual", Servers: 3, Agents: 2,
+		})
+		want := createK3kClusterParams{
+			Name: "k3k", Namespace: "k3k-ns", TargetCluster: "down",
+			Version: "v1.33.1-k3s1", Mode: "virtual", Servers: 3, Agents: 2,
+		}
+		if got != want {
+			t.Errorf("k3kClusterParams = %+v, want %+v", got, want)
+		}
+	})
+
+	t.Run("scale scalars", func(t *testing.T) {
+		got := scaleParams(dispatch.ChangeParams{
+			Cluster: "c", Namespace: "ns", NodePoolName: "pool",
+			DesiredSize: 7, AmountToAdd: 2, AmountToSubtract: 1,
+		})
+		want := scaleNodePoolParameters{
+			Cluster: "c", Namespace: "ns", NodePoolName: "pool",
+			DesiredSize: 7, AmountToAdd: 2, AmountToSubtract: 1,
+		}
+		if got != want {
+			t.Errorf("scaleParams = %+v, want %+v", got, want)
+		}
+	})
+}
+
+// TestProvisioningPhaseInversion pins that each provisioning operation maps to
+// the plan handler in the plan table and the execute handler in the execute
+// table — never the other way round. The two phases are observationally
+// distinct: the plan handler issues a token and patches nothing, the execute
+// handler consumes that token and patches the cluster once.
+func TestProvisioningPhaseInversion(t *testing.T) {
+	tools, dyn := newScalingCaseTools(t)
+	req := &mcp.CallToolRequest{Params: &mcp.CallToolParamsRaw{Name: "scaleClusterNodePool"}}
+
+	// The plan case returns a plan and touches nothing.
+	res, _, err := tools.PlanCases()["scaleClusterNodePool"].Handler(
+		middleware.WithToken(context.Background(), testToken), req,
+		dispatch.ChangeParams{Operation: "scaleClusterNodePool", Cluster: "test-cluster", Namespace: "fleet-default", NodePoolName: "test-nodepool", DesiredSize: 3})
+	require.NoError(t, err)
+	assert.True(t, isPlanResponse(t, res.Content[0].(*mcp.TextContent).Text),
+		"the plan case must return a plan carrying a confirmationToken")
+	assert.Zero(t, countPatches(dyn), "planning a scale must not patch the cluster")
+
+	// The execute case, given the token the plan mints for exactly this
+	// operation, executes — it must not return a second plan.
+	token := issueScaleToken(t, tools, tools.cfg.Gate, req,
+		scaleNodePoolParameters{Cluster: "test-cluster", Namespace: "fleet-default", NodePoolName: "test-nodepool", DesiredSize: 3})
+	res, _, err = tools.ExecuteCases()["scaleClusterNodePool"].Handler(
+		middleware.WithToken(context.Background(), testToken), req,
+		dispatch.ChangeParams{Operation: "scaleClusterNodePool", Cluster: "test-cluster", Namespace: "fleet-default", NodePoolName: "test-nodepool", DesiredSize: 3, ConfirmationToken: token})
+	require.NoError(t, err)
+	assert.False(t, isPlanResponse(t, res.Content[0].(*mcp.TextContent).Text),
+		"the execute case must execute, not return another plan")
+	assert.Equal(t, 1, countPatches(dyn), "the execute case must apply the scale exactly once")
+}
+
+// newScalingCaseTools builds Tools over a fake dynamic client holding one
+// scalable provisioning cluster with one worker node pool, plus a real
+// confirmation gate.
+func newScalingCaseTools(t *testing.T) (*Tools, *dynamicfake.FakeDynamicClient) {
+	t.Helper()
+	dyn := dynamicfake.NewSimpleDynamicClientWithCustomListKinds(provisioningSchemes(), provisioningCustomListKinds(),
+		newProvisioningClusterWithRKEConfig("test-cluster", "fleet-default", "c-m-abc123", []provisioningV1.RKEMachinePool{
+			{WorkerRole: true, Name: "test-nodepool", Quantity: ptr.To[int32](1)},
+		}))
+	c := &client.Client{
+		ClientSetCreator: func(*rest.Config) (kubernetes.Interface, error) { return newFakeClientSet(), nil },
+		DynClientCreator: func(*rest.Config) (dynamic.Interface, error) { return dyn, nil },
+	}
+	gate := fakeGates(t, approveElicit)
+	return NewTools(c, toolconfig.Config{Gate: gate}), dyn
+}
+
+// isPlanResponse reports whether a response is a plan carrying a confirmation
+// block.
+func isPlanResponse(t *testing.T, text string) bool {
+	t.Helper()
+	var parsed map[string]any
+	require.NoError(t, json.Unmarshal([]byte(text), &parsed))
+	_, isPlan := parsed["plan"]
+	_, hasConfirmation := parsed["confirmation"]
+	return isPlan && hasConfirmation
 }

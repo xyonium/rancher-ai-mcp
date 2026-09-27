@@ -3,6 +3,7 @@ package core
 import (
 	"context"
 	"encoding/json"
+	"reflect"
 	"strings"
 	"testing"
 
@@ -71,9 +72,11 @@ var changeCasePod = &corev1.Pod{
 
 func TestPlanExecuteCaseKeys(t *testing.T) {
 	tools := NewTools(nil, changeCfg(t, false))
-	want := []string{"createKubernetesResource", "patchKubernetesResource", "deleteKubernetesResource", "execPod"}
+	// The core change table is core's own four cases plus the projects
+	// sub-toolset's createProject, unioned in for the merged tools.
+	want := []string{"createKubernetesResource", "patchKubernetesResource", "deleteKubernetesResource", "execPod", "createProject"}
 	if len(tools.PlanCases()) != len(want) || len(tools.ExecuteCases()) != len(want) {
-		t.Fatalf("core owns %d plan and %d execute cases", len(tools.PlanCases()), len(tools.ExecuteCases()))
+		t.Fatalf("core owns %d plan and %d execute cases, want %d", len(tools.PlanCases()), len(tools.ExecuteCases()), len(want))
 	}
 	for _, k := range want {
 		if _, ok := tools.PlanCases()[k]; !ok {
@@ -94,6 +97,7 @@ func TestChangeCaseRequiredFields(t *testing.T) {
 		"patchKubernetesResource":  {"cluster", "kind", "name", "patch"},
 		"deleteKubernetesResource": {"cluster", "kind", "name"},
 		"execPod":                  {"cluster", "namespace", "name", "command"},
+		"createProject":            {"cluster", "name"},
 	}
 	for _, phase := range []string{"plan", "execute"} {
 		cases := tools.PlanCases()
@@ -307,4 +311,146 @@ func TestDispatchUnknownOperation(t *testing.T) {
 	_, _, err := dispatch.Dispatch(context.Background(), &mcp.CallToolRequest{}, "operation", "nope", dispatch.ChangeParams{}, tools.PlanCases())
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "unknown operation")
+}
+
+// TestCoreConverterValueMapping pins every core converter field-by-field: the
+// flat merged params must land in the typed handler params without a transposed
+// or dropped assignment (review proved the converters mutation-sensitive).
+func TestCoreConverterValueMapping(t *testing.T) {
+	patch := json.RawMessage(`[{"op":"replace","path":"/data/k","value":"v"}]`)
+	pl, err := patchList(patch)
+	require.NoError(t, err)
+
+	full := dispatch.ChangeParams{
+		Operation: "patchKubernetesResource", Cluster: "c", Namespace: "ns", Name: "n",
+		Kind: "configmap", APIVersion: "v1", Manifest: "apiVersion: v1\nkind: ConfigMap\nmetadata:\n  name: n\n",
+		Container: "sidecar", Command: []string{"ls", "-la"},
+		ConfirmationToken: "tok",
+	}
+
+	if got, want := createParams(full), (createKubernetesResourceParams{
+		Name: "n", Namespace: "ns", Kind: "configmap", Cluster: "c", Manifest: full.Manifest, ConfirmationToken: "tok",
+	}); got != want {
+		t.Errorf("createParams = %+v, want %+v", got, want)
+	}
+
+	if got, want := updateParams(full, pl), (updateKubernetesResourceParams{
+		Name: "n", Namespace: "ns", Kind: "configmap", APIVersion: "v1", Cluster: "c", Patch: pl, ConfirmationToken: "tok",
+	}); !reflect.DeepEqual(got, want) {
+		t.Errorf("updateParams = %+v, want %+v", got, want)
+	}
+
+	if got, want := deleteParams(full), (deleteKubernetesResourceParams{
+		Name: "n", Namespace: "ns", Kind: "configmap", APIVersion: "v1", Cluster: "c", ConfirmationToken: "tok",
+	}); got != want {
+		t.Errorf("deleteParams = %+v, want %+v", got, want)
+	}
+
+	if got, want := execParams(full), (execPodParams{
+		Cluster: "c", Namespace: "ns", Name: "n", Container: "sidecar", Command: []string{"ls", "-la"}, ConfirmationToken: "tok",
+	}); !reflect.DeepEqual(got, want) {
+		t.Errorf("execParams = %+v, want %+v", got, want)
+	}
+
+	// A create request carries no apiVersion field: the manifest is the source
+	// of truth, so the flat apiVersion must not leak into the typed params.
+	if got := createParams(full).Manifest; got != full.Manifest {
+		t.Errorf("createParams manifest = %q, want %q", got, full.Manifest)
+	}
+}
+
+// TestCreatePhaseInversion proves the create operation is wired to the plan
+// handler in the plan table and to the execute handler in the execute table:
+// PLAN must not mutate the cluster, EXECUTE must mutate and must not return a
+// second plan.
+func TestCreatePhaseInversion(t *testing.T) {
+	cfg := changeCfg(t, false)
+	cfg.Gate.ElicitFunc = approveElicit
+	tools, dyn := newChangeCaseTools(t, cfg)
+	// The fixture already holds a configmap named "d", so the create uses a
+	// fresh name: the "already exists" error would otherwise mask the phase
+	// assertions below.
+	params := dispatch.ChangeParams{
+		Operation: "createKubernetesResource", Cluster: "local", Kind: "ConfigMap", Namespace: "default", Name: "created-cm",
+		Manifest: "apiVersion: v1\nkind: ConfigMap\nmetadata:\n  name: created-cm\n  namespace: default\ndata:\n  k: v\n",
+	}
+	ctx := middleware.WithToken(context.Background(), "fakeToken")
+
+	res, _, err := tools.PlanCases()["createKubernetesResource"].Handler(ctx, &mcp.CallToolRequest{}, params)
+	require.NoError(t, err)
+	planText := res.Content[0].(*mcp.TextContent).Text
+	assert.Contains(t, planText, `"plan"`)
+	assert.Contains(t, planText, `"confirmationToken"`)
+	assert.Zero(t, countCreates(dyn, nil), "planning a creation must not create anything")
+
+	// Mint the token the plan handler mints for exactly this manifest, then run
+	// the execute case: it must create once and return the created object, not
+	// another plan.
+	token := issueTokenFor(t, cfg.Gate, createParams(params))
+	res, _, err = tools.ExecuteCases()["createKubernetesResource"].Handler(ctx, &mcp.CallToolRequest{},
+		dispatch.ChangeParams{
+			Operation: "createKubernetesResource", Cluster: "local", Kind: "ConfigMap", Namespace: "default", Name: "created-cm",
+			Manifest: params.Manifest, ConfirmationToken: token,
+		})
+	require.NoError(t, err)
+	execText := res.Content[0].(*mcp.TextContent).Text
+	assert.NotContains(t, execText, `"confirmationToken"`, "the execute case must execute, not re-plan")
+	assert.Equal(t, 1, countCreates(dyn, nil), "the execute case must create exactly once")
+	assert.Contains(t, execText, `"name":"created-cm"`, "the created object must be the one named on the wire")
+}
+
+// TestExecPodPhaseInversion proves the exec operation is wired to the plan
+// handler in the plan table and to the execute handler in the execute table:
+// PLAN only validates the pod and mints a token, EXECUTE consumes the token,
+// asks the user directly and runs the command.
+func TestExecPodPhaseInversion(t *testing.T) {
+	cfg := changeCfg(t, true)
+	tools, _ := newChangeCaseTools(t, cfg)
+	cfg.Gate.ElicitFunc = approveElicit
+	capture := fakeExecFactory(t, &fakeExecutor{stdout: "ok\n"})
+
+	params := dispatch.ChangeParams{
+		Operation: "execPod", Cluster: "local", Namespace: "default", Name: "p", Command: []string{"true"},
+	}
+	ctx := middleware.WithToken(context.Background(), "fakeToken")
+
+	res, _, err := tools.PlanCases()["execPod"].Handler(ctx, &mcp.CallToolRequest{}, params)
+	require.NoError(t, err)
+	planText := res.Content[0].(*mcp.TextContent).Text
+	assert.Contains(t, planText, `"confirmationToken"`)
+	assert.Nil(t, capture.url, "planning an exec must not start a stream")
+
+	// The execute case with the token from the plan handler runs the command.
+	token := issueExecToken(t, cfg.Gate, execParams(params))
+	res, _, err = tools.ExecuteCases()["execPod"].Handler(ctx, &mcp.CallToolRequest{},
+		dispatch.ChangeParams{
+			Operation: "execPod", Cluster: "local", Namespace: "default", Name: "p",
+			Command: []string{"true"}, ConfirmationToken: token,
+		})
+	require.NoError(t, err)
+	require.NotNil(t, capture.url, "the execute case must start the exec stream")
+	assert.Contains(t, res.Content[0].(*mcp.TextContent).Text, `"stdout":"ok\n"`,
+		"the execute case must return the command output, not a plan")
+}
+
+// TestPlanCasesIgnoreConfirmationToken documents the harmless asymmetry of the
+// shared converters: the plan tables carry no token requirement, so a token
+// passed to a plan case is not validated by the gate — plan calls never mutate
+// anything, which the phase-inversion tests above verify.
+func TestPlanCasesIgnoreConfirmationToken(t *testing.T) {
+	cfg := changeCfg(t, false)
+	tools, dyn := newChangeCaseTools(t, cfg)
+
+	for _, k := range []string{"createKubernetesResource", "deleteKubernetesResource"} {
+		assert.NotContains(t, tools.PlanCases()[k].Required, "confirmationToken",
+			"plan case %q must not require a token", k)
+	}
+	_, _, err := tools.PlanCases()["deleteKubernetesResource"].Handler(
+		middleware.WithToken(context.Background(), "fakeToken"), &mcp.CallToolRequest{},
+		dispatch.ChangeParams{
+			Operation: "deleteKubernetesResource", Cluster: "local", Kind: "configmap", Namespace: "default", Name: "d",
+			ConfirmationToken: "not-a-real-token",
+		})
+	require.NoError(t, err, "a plan call must not fail on a foreign token: it never executes")
+	assert.Zero(t, countDeletes(dyn, nil), "a plan call must not delete anything")
 }

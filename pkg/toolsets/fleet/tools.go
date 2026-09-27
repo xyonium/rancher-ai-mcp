@@ -3,11 +3,9 @@ package fleet
 import (
 	"context"
 
-	"github.com/modelcontextprotocol/go-sdk/mcp"
 	"github.com/rancher/rancher-ai-mcp/pkg/client"
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 	"k8s.io/client-go/rest"
-	"k8s.io/utils/ptr"
 )
 
 const (
@@ -39,54 +37,7 @@ func NewTools(client toolsClient) *Tools {
 	}
 }
 
-// AddTools registers all Rancher Kubernetes tools with the provided MCP server.
-// Each tool is configured with metadata identifying it as part of the rancher toolset.
-func (t *Tools) AddTools(mcpServer *mcp.Server) {
-	mcp.AddTool(mcpServer, &mcp.Tool{
-		Name: "getBundle",
-		Meta: map[string]any{
-			toolsSetAnn: toolsSet,
-		},
-		Annotations: &mcp.ToolAnnotations{ReadOnlyHint: true, OpenWorldHint: ptr.To(false)},
-		Description: `Get a specific Fleet Bundle by name and workspace.`},
-		t.getBundle,
-	)
-	mcp.AddTool(mcpServer, &mcp.Tool{
-		Name: "getGitRepo",
-		Meta: map[string]any{
-			toolsSetAnn: toolsSet,
-		},
-		Annotations: &mcp.ToolAnnotations{ReadOnlyHint: true, OpenWorldHint: ptr.To(false)},
-		Description: `Get a specific GitRepo by name and workspace.`},
-		t.getGitRepo,
-	)
-	mcp.AddTool(mcpServer, &mcp.Tool{
-		Name: "listGitRepos",
-		Meta: map[string]any{
-			toolsSetAnn: toolsSet,
-		},
-		Annotations: &mcp.ToolAnnotations{ReadOnlyHint: true, OpenWorldHint: ptr.To(false)},
-		Description: `List all GitRepos in a workspace.`},
-		t.listGitRepos,
-	)
-	mcp.AddTool(mcpServer, &mcp.Tool{
-		Name: "analyzeFleetResources",
-		Meta: map[string]any{
-			toolsSetAnn: toolsSet,
-		},
-		Annotations: &mcp.ToolAnnotations{ReadOnlyHint: true, OpenWorldHint: ptr.To(false)},
-		Description: `Analyze Fleet resources and diagnose bundle deployment issues.
-
-This command collects diagnostic information about Fleet resources including GitRepos,
-Bundles, BundleDeployments, and related resources. It outputs JSON containing only the
-fields relevant for troubleshooting, making it easy to identify issues like:
-
-- Bundles stuck with old commits or forceSyncGeneration
-- BundleDeployments not applying their target deploymentID
-- Orphaned secrets with invalid owner references
-- Resources stuck with deletion timestamps due to finalizers
-- API server consistency issues (time travel)
-- Missing or problematic Content resources`},
-		t.analyzeFleetResources,
-	)
-}
+// The Fleet tools have no AddTools method: getBundle, getGitRepo, listGitRepos
+// and analyzeFleetResources are exposed as cases of the merged rancherQuery and
+// diagnose tools, all of them read-only. The Tools type only holds the handlers
+// and their clients.
