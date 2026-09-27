@@ -83,6 +83,6 @@ Supports any resource kind including custom resources. If the kind is unknown to
 		Name:        "listAPIResources",
 		Meta:        map[string]any{toolsSetAnn: toolsSet},
 		Annotations: &mcp.ToolAnnotations{ReadOnlyHint: true},
-		Description: `Returns every API resource type (group, version, kind, resource, namespaced) served by the cluster, including all custom resources (CRDs). Use this tool FIRST to discover the correct kind and apiVersion before calling getKubernetesResource, listKubernetesResources, createKubernetesResource, patchKubernetesResource or deleteKubernetesResource with a custom resource.`,
+		Description: `Returns every API resource type (group, version, kind, resource, namespaced) served by the cluster, including all custom resources (CRDs). Use this tool FIRST to discover the correct kind and apiVersion before calling getKubernetesResource or listKubernetesResources, or before planning a change with planChange/executeChange (operation=createKubernetesResource, patchKubernetesResource or deleteKubernetesResource), when working with a custom resource.`,
 	}, t.listAPIResources)
 }

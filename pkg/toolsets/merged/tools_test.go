@@ -3,11 +3,11 @@ package merged
 
 import (
 	"context"
+	"encoding/json"
+	"reflect"
 	"slices"
 	"strings"
 	"testing"
-
-	"encoding/json"
 
 	"github.com/modelcontextprotocol/go-sdk/mcp"
 	"github.com/rancher/rancher-ai-mcp/pkg/client"
@@ -16,6 +16,15 @@ import (
 	"github.com/rancher/rancher-ai-mcp/pkg/toolsets/dispatch"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/apimachinery/pkg/runtime"
+	"k8s.io/apimachinery/pkg/runtime/schema"
+	fakediscovery "k8s.io/client-go/discovery/fake"
+	"k8s.io/client-go/dynamic"
+	dynamicfake "k8s.io/client-go/dynamic/fake"
+	"k8s.io/client-go/kubernetes"
+	"k8s.io/client-go/kubernetes/fake"
+	"k8s.io/client-go/rest"
 )
 
 // fullModeTools is the merged surface in strict/full mode: the 3 k8s-generic
@@ -244,6 +253,165 @@ func TestCaseMapsMatchSchemaEnums(t *testing.T) {
 	assertKeys(t, "execute", m.execute, dispatch.ChangeOperations)
 }
 
+// TestCaseMapForPhaseBinding pins the plan/execute → case-map selection, the
+// only thing making the plan verb unable to mutate: both maps are
+// Case[ChangeParams], so a swap would compile and, under --allow-auto-write,
+// let planChange execute a create immediately. The identity comparison below
+// fails if the two arguments are swapped; TestChangePhaseInversionEndToEnd
+// proves the same property through the registered wire surface.
+func TestCaseMapForPhaseBinding(t *testing.T) {
+	m := buildCaseMaps(&client.Client{}, toolconfig.Config{})
+
+	planMap := caseMapFor(phasePlan, m)
+	executeMap := caseMapFor(phaseExecute, m)
+
+	// Identity, not equality: the plan phase must hand Dispatch the plan map
+	// itself, never a copy or the execute map.
+	planPtr := reflect.ValueOf(planMap).Pointer()
+	executePtr := reflect.ValueOf(executeMap).Pointer()
+	assert.Equal(t, reflect.ValueOf(m.plan).Pointer(), planPtr, "the plan phase must select cases.plan")
+	assert.Equal(t, reflect.ValueOf(m.execute).Pointer(), executePtr, "the execute phase must select cases.execute")
+	assert.NotEqual(t, planPtr, executePtr, "the two phases must not select the same map")
+
+	// The two maps are equivalent in type but not in content: the plan cases
+	// must never demand a confirmationToken, which is what makes a
+	// plan-dispatched create safe under auto-write.
+	assert.NotEmpty(t, planMap)
+	for op, c := range planMap {
+		assert.NotContains(t, c.Required, "confirmationToken",
+			"plan case %q must not require a confirmationToken", op)
+	}
+	assert.Contains(t, executeMap["createKubernetesResource"].Required, "manifest",
+		"sanity: the execute map must be the change table, not an empty map")
+
+	// An unknown phase selects nothing rather than silently planning.
+	assert.Nil(t, caseMapFor("bogus", m))
+}
+
+// newChangeWireClient builds a *client.Client that resolves kinds from fake
+// discovery and records every dynamic verb against the given fake client.
+func newChangeWireClient(t *testing.T, dyn *dynamicfake.FakeDynamicClient, discovery []*metav1.APIResourceList) *client.Client {
+	t.Helper()
+	cs := fake.NewClientset()
+	fd, ok := cs.Discovery().(*fakediscovery.FakeDiscovery)
+	require.True(t, ok)
+	fd.Resources = discovery
+	return &client.Client{
+		ClientSetCreator: func(*rest.Config) (kubernetes.Interface, error) { return cs, nil },
+		DynClientCreator: func(*rest.Config) (dynamic.Interface, error) { return dyn, nil },
+	}
+}
+
+// changeDiscovery serves the ConfigMap kind the wire test creates.
+var changeDiscovery = []*metav1.APIResourceList{
+	{GroupVersion: "v1", APIResources: []metav1.APIResource{
+		{Name: "configmaps", Kind: "ConfigMap", Namespaced: true},
+	}},
+}
+
+// TestChangePhaseInversionEndToEnd is the F1 regression test: it drives the
+// registered planChange and executeChange tools over an in-memory MCP
+// connection, through Dispatch and the real case maps, and asserts the phase
+// semantics that the map binding exists to guarantee — a plan-dispatched create
+// must not mutate the cluster, an execute-dispatched one must. Swapping
+// cases.plan/cases.execute in Register makes the plan call create and fails
+// here.
+func TestChangePhaseInversionEndToEnd(t *testing.T) {
+	const manifest = "apiVersion: v1\nkind: ConfigMap\nmetadata:\n  name: e2e-cm\n  namespace: default\ndata:\n  k: v\n"
+	dyn := dynamicfake.NewSimpleDynamicClientWithCustomListKinds(runtime.NewScheme(), map[schema.GroupVersionResource]string{
+		{Group: "", Version: "v1", Resource: "configmaps"}: "ConfigMapList",
+	})
+	gate, err := confirm.NewGate()
+	require.NoError(t, err)
+	gate.ElicitFunc = func(context.Context, *mcp.ServerSession, *mcp.ElicitParams) (*mcp.ElicitResult, error) {
+		return &mcp.ElicitResult{Action: "accept", Content: map[string]any{"confirm": "approve"}}, nil
+	}
+
+	cfg := toolconfig.Config{}
+	cfg.Gate = gate
+	sess := connectServer(t, newChangeWireClient(t, dyn, changeDiscovery), cfg)
+	ctx := context.Background()
+	args := map[string]any{
+		"operation": "createKubernetesResource", "cluster": "local", "kind": "ConfigMap",
+		"namespace": "default", "name": "e2e-cm", "manifest": manifest,
+	}
+
+	// PLAN: the plan tool must return a plan carrying the token and leave the
+	// cluster untouched. If the maps are swapped, the create runs here.
+	planRes, err := sess.CallTool(ctx, &mcp.CallToolParams{Name: "planChange", Arguments: args})
+	require.NoError(t, err)
+	require.False(t, planRes.IsError, "planChange must not fail: %s", textOf(planRes))
+	assert.Contains(t, textOf(planRes), `"plan"`)
+	assert.Contains(t, textOf(planRes), `"confirmationToken"`)
+	assert.Zero(t, createCount(dyn), "planChange must not create anything")
+
+	// EXECUTE: with the token from the plan response, executeChange must create
+	// exactly once and return the created object, not a second plan.
+	token := tokenOf(t, textOf(planRes))
+	execArgs := map[string]any{}
+	for k, v := range args {
+		execArgs[k] = v
+	}
+	execArgs["confirmationToken"] = token
+	execRes, err := sess.CallTool(ctx, &mcp.CallToolParams{Name: "executeChange", Arguments: execArgs})
+	require.NoError(t, err)
+	require.False(t, execRes.IsError, "executeChange must not fail: %s", textOf(execRes))
+	assert.NotContains(t, textOf(execRes), `"confirmationToken"`, "the execute verb must execute, not re-plan")
+	assert.Equal(t, 1, createCount(dyn), "executeChange must create exactly once")
+}
+
+// connectServer registers the merged surface and returns a connected client
+// session.
+func connectServer(t *testing.T, c *client.Client, cfg toolconfig.Config) *mcp.ClientSession {
+	t.Helper()
+	server := mcp.NewServer(&mcp.Implementation{Name: "test", Version: "v0"}, nil)
+	Register(c, server, cfg)
+
+	ct, st := mcp.NewInMemoryTransports()
+	_, err := server.Connect(context.Background(), st, nil)
+	require.NoError(t, err)
+	mc := mcp.NewClient(&mcp.Implementation{Name: "c", Version: "v0"}, nil)
+	sess, err := mc.Connect(context.Background(), ct, nil)
+	require.NoError(t, err)
+	t.Cleanup(func() { sess.Close() })
+	return sess
+}
+
+// textOf returns the concatenated text content of a tool result.
+func textOf(res *mcp.CallToolResult) string {
+	var b strings.Builder
+	for _, c := range res.Content {
+		if tc, ok := c.(*mcp.TextContent); ok {
+			b.WriteString(tc.Text)
+		}
+	}
+	return b.String()
+}
+
+// tokenOf extracts the confirmationToken from a plan response body.
+func tokenOf(t *testing.T, body string) string {
+	t.Helper()
+	var parsed struct {
+		Confirmation struct {
+			Token string `json:"confirmationToken"`
+		} `json:"confirmation"`
+	}
+	require.NoError(t, json.Unmarshal([]byte(body), &parsed))
+	require.NotEmpty(t, parsed.Confirmation.Token, "the plan response must carry a token")
+	return parsed.Confirmation.Token
+}
+
+// createCount returns how many create actions the fake dynamic client recorded.
+func createCount(dyn *dynamicfake.FakeDynamicClient) int {
+	n := 0
+	for _, action := range dyn.Actions() {
+		if action.GetVerb() == "create" {
+			n++
+		}
+	}
+	return n
+}
+
 func assertKeys[P any](t *testing.T, name string, m map[string]dispatch.Case[P], want []string) {
 	t.Helper()
 	var got []string
@@ -251,6 +419,10 @@ func assertKeys[P any](t *testing.T, name string, m map[string]dispatch.Case[P],
 		got = append(got, k)
 	}
 	slices.Sort(got)
+	// Clone before sorting: callers pass the package-level enum vars of
+	// dispatch/schemas.go, and sorting in place would reorder their backing
+	// arrays, making any later order-sensitive assertion test-order dependent.
+	want = slices.Clone(want)
 	slices.Sort(want)
 	if !slices.Equal(got, want) {
 		t.Errorf("%s case keys = %v, want %v", name, got, want)

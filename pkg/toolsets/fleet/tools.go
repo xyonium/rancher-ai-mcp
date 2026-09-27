@@ -8,11 +8,6 @@ import (
 	"k8s.io/client-go/rest"
 )
 
-const (
-	toolsSet    = "fleet"
-	toolsSetAnn = "toolset"
-)
-
 type toolsClient interface {
 	GetResource(ctx context.Context, params client.GetParams) (*unstructured.Unstructured, error)
 	GetResources(ctx context.Context, params client.ListParams) ([]*unstructured.Unstructured, error)

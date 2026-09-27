@@ -52,15 +52,12 @@ func TestAddAllToolsDelegatesToMerged(t *testing.T) {
 	}
 }
 
-// TestWriteToolInventoryMatchesRegistration guards the cross-task invariant
-// that the safety instructions never advertise more than the server registers.
-// In the merged surface the only non-read-only tools are planChange and
-// executeChange: every mutating operation is an enum value inside them, so a
-// write tool that appears here but is not one of the two change tools (or vice
-// versa) fails this test.
-//
-// The operation inventory itself is checked against the registered change tools
-// by the instructions tests, which own the rendered text.
+// TestWriteToolInventoryMatchesRegistration guards the invariant that the
+// safety instructions never advertise more than the server registers. In the
+// merged surface the only non-read-only tools are planChange and executeChange:
+// every mutating operation is an enum value inside them, so a write tool that
+// appears here but is not one of the two change tools (or vice versa) fails
+// this test.
 func TestWriteToolInventoryMatchesRegistration(t *testing.T) {
 	for _, tc := range []struct {
 		name string

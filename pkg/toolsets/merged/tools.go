@@ -38,6 +38,29 @@ func buildCaseMaps(c *client.Client, cfg toolconfig.Config) caseMaps {
 	}
 }
 
+// phasePlan and phaseExecute are the two change phases, used by caseMapFor.
+const (
+	phasePlan    = "plan"
+	phaseExecute = "execute"
+)
+
+// caseMapFor selects the dispatch table of a change phase. This is the single
+// place where planChange and executeChange pick their cases, so the binding is
+// one reviewed line of code instead of two literal arguments buried in
+// Register — and a test can pin it. Returns nil for an unknown phase: Register
+// only ever passes the constants above, and a nil map would surface as an
+// "unknown operation" error rather than silently planning.
+func caseMapFor(phase string, m caseMaps) map[string]dispatch.Case[dispatch.ChangeParams] {
+	switch phase {
+	case phasePlan:
+		return m.plan
+	case phaseExecute:
+		return m.execute
+	default:
+		return nil
+	}
+}
+
 // Register registers the full consolidated surface: the 3 k8s-generic tools,
 // rancherQuery and diagnose, and — unless read-only — planChange and
 // executeChange.
@@ -81,7 +104,7 @@ func Register(c *client.Client, mcpServer *mcp.Server, cfg toolconfig.Config) {
 
 Plans one change selected by operation: createKubernetesResource (manifest in YAML or JSON), patchKubernetesResource (RFC 6902 JSON patch), deleteKubernetesResource (returns the resource that would be deleted), scaleClusterNodePool, execPod (only when the server runs with --enable-exec), createProject, createCustomCluster, createImportedCluster, createK3kCluster. Each operation has its own required parameters — see the field descriptions; a missing parameter produces an error naming it.`},
 		func(ctx context.Context, req *mcp.CallToolRequest, p dispatch.ChangeParams) (*mcp.CallToolResult, any, error) {
-			return dispatch.Dispatch(ctx, req, "operation", p.Operation, p, cases.plan)
+			return dispatch.Dispatch(ctx, req, "operation", p.Operation, p, caseMapFor(phasePlan, cases))
 		},
 	)
 
@@ -94,7 +117,7 @@ Plans one change selected by operation: createKubernetesResource (manifest in YA
 
 Executes one change selected by operation (same values and required parameters as planChange). The confirmationToken binds the exact operation and parameters: reusing a token across operations or parameters fails.`},
 		func(ctx context.Context, req *mcp.CallToolRequest, p dispatch.ChangeParams) (*mcp.CallToolResult, any, error) {
-			return dispatch.Dispatch(ctx, req, "operation", p.Operation, p, cases.execute)
+			return dispatch.Dispatch(ctx, req, "operation", p.Operation, p, caseMapFor(phaseExecute, cases))
 		},
 	)
 }

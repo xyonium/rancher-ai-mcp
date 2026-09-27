@@ -9,11 +9,6 @@ import (
 	"k8s.io/client-go/dynamic"
 )
 
-const (
-	toolsSet    = "rancher"
-	toolsSetAnn = "toolset"
-)
-
 type toolsClient interface {
 	GetClusterID(ctx context.Context, token string, clusterNameOrID string) (string, error)
 	GetResource(ctx context.Context, params client.GetParams) (*unstructured.Unstructured, error)

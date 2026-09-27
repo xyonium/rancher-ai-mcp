@@ -10,11 +10,6 @@ import (
 	"k8s.io/client-go/dynamic"
 )
 
-const (
-	ToolsSet    = "provisioning"
-	toolsSetAnn = "toolset"
-)
-
 type toolsClient interface {
 	GetResource(ctx context.Context, params client.GetParams) (*unstructured.Unstructured, error)
 	GetResourceAtAnyAPIVersion(ctx context.Context, params client.GetParams) (*unstructured.Unstructured, error)

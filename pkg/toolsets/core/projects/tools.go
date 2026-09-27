@@ -10,11 +10,8 @@ import (
 	"k8s.io/client-go/dynamic"
 )
 
-const (
-	toolsSet     = "rancher"
-	toolsSetAnn  = "toolset"
-	LocalCluster = "local"
-)
+// LocalCluster is the cluster the Rancher management API types live in.
+const LocalCluster = "local"
 
 type toolsClient interface {
 	GetClusterID(ctx context.Context, token string, clusterNameOrID string) (string, error)
