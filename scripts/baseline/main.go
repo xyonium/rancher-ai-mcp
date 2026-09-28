@@ -4,8 +4,10 @@
 //
 // Subcommands:
 //
-//	baseline discover   discover real parameters via read tools, write .baseline/discovered.json
-//	baseline capture   run the case matrix in scripts/baseline/calls.json, write golden files
+//	baseline discover     discover real parameters via read tools, write .baseline/discovered.json
+//	baseline capture      run the case matrix in scripts/baseline/calls.json, write v1 golden files
+//	baseline capture -v2  replay the same cases through their mapsTo mapping (merged surface), write v2 goldens
+//	baseline compare      byte-compare the v1 and v2 .norm.json goldens of every shared case
 //
 // Configuration is loaded from .baseline/config.json ({"url": ..., "headers":
 // {...}}). When absent it is generated from the "rancher" entry of the local
@@ -20,6 +22,7 @@ import (
 	"errors"
 	"flag"
 	"fmt"
+	"io"
 	"net/http"
 	"os"
 	"path/filepath"
@@ -33,8 +36,14 @@ import (
 
 const (
 	// repoRoot-relative paths
-	baselineDir     = ".baseline"
-	goldenDir       = ".baseline/golden/v1"
+	baselineDir = ".baseline"
+	// goldenDirV1 is the pre-refactor corpus: the 43 per-operation tools of the
+	// old surface, captured with `capture` (no flag).
+	goldenDirV1 = ".baseline/golden/v1"
+	// goldenDirV2 is the post-refactor corpus: the same 43 cases replayed
+	// through each case's mapsTo mapping onto the merged 7-tool surface,
+	// captured with `capture -v2`.
+	goldenDirV2     = ".baseline/golden/v2"
 	callsFile       = "scripts/baseline/calls.json"
 	configFile      = ".baseline/config.json"
 	discoveredFile  = ".baseline/discovered.json"
@@ -69,15 +78,20 @@ func run() error {
 		cmd = os.Args[1]
 	}
 	fs := flag.NewFlagSet(cmd, flag.ExitOnError)
+	v2 := false
+	fs.BoolVar(&v2, "v2", false, "capture through each case's mapsTo mapping into "+goldenDirV2+" (merged surface)")
 	switch cmd {
 	case "discover":
 		_ = fs.Parse(os.Args[2:])
 		return discover()
 	case "capture":
 		_ = fs.Parse(os.Args[2:])
-		return capture()
+		return capture(v2)
+	case "compare":
+		_ = fs.Parse(os.Args[2:])
+		return compare()
 	default:
-		return fmt.Errorf("unknown subcommand %q (want discover or capture)", cmd)
+		return fmt.Errorf("unknown subcommand %q (want discover, capture or compare)", cmd)
 	}
 }
 
@@ -936,7 +950,42 @@ type callCase struct {
 	} `json:"mapsTo"`
 }
 
-func capture() error {
+// plannedCall is one fully-resolved call of a capture run.
+type plannedCall struct {
+	id     string
+	tool   string
+	params map[string]any
+}
+
+// planCalls resolves each case to the tool+params this run will call: v1 uses
+// the case's own tool/params, v2 uses the mapsTo mapping onto the merged
+// surface. A blank tool is a hard error — in v2 it would silently call the
+// empty tool name.
+func planCalls(cases []callCase, v2 bool) ([]plannedCall, error) {
+	planned := make([]plannedCall, 0, len(cases))
+	for _, c := range cases {
+		pc := plannedCall{id: c.ID, tool: c.Tool, params: c.Params}
+		if v2 {
+			pc.tool = c.MapsTo.Tool
+			pc.params = c.MapsTo.Params
+		}
+		if pc.tool == "" {
+			where := "case"
+			if v2 {
+				where = "mapsTo"
+			}
+			return nil, fmt.Errorf("case %s: no %s tool configured", c.ID, where)
+		}
+		planned = append(planned, pc)
+	}
+	return planned, nil
+}
+
+// capture runs the case matrix. In v1 mode (v2=false) it calls the case's own
+// tool/params (the old per-operation surface); in v2 mode it replays every case
+// through its mapsTo mapping onto the merged 7-tool surface. The goldens of the
+// two modes land in different directories so compare can diff them.
+func capture(v2 bool) error {
 	ctx, cancel := context.WithTimeout(context.Background(), captureTotalTimeout)
 	defer cancel()
 
@@ -971,45 +1020,54 @@ func capture() error {
 		return fmt.Errorf("%s: expected 43 cases, got %d", callsFile, len(cases))
 	}
 
-	if err := os.MkdirAll(goldenDir, 0o755); err != nil {
+	planned, err := planCalls(cases, v2)
+	if err != nil {
+		return err
+	}
+
+	outDir := goldenDirV1
+	if v2 {
+		outDir = goldenDirV2
+	}
+	if err := os.MkdirAll(outDir, 0o755); err != nil {
 		return err
 	}
 
 	var okCount, errCount int
 	var failures []string
 	start := time.Now()
-	for i, c := range cases {
-		params, err := resolvePlaceholders(c.Params, &disc)
+	for i, pc := range planned {
+		params, err := resolvePlaceholders(pc.params, &disc)
 		if err != nil {
-			return fmt.Errorf("case %s: %w", c.ID, err)
+			return fmt.Errorf("case %s: %w", pc.id, err)
 		}
 		callCtx, callCancel := context.WithTimeout(ctx, perCallTimeout)
-		raw, err := callTool(callCtx, session, c.Tool, params)
+		raw, err := callTool(callCtx, session, pc.tool, params)
 		callCancel()
 		if err != nil {
-			failures = append(failures, fmt.Sprintf("%s: %v", c.ID, err))
+			failures = append(failures, fmt.Sprintf("%s: %v", pc.id, err))
 			continue
 		}
 
-		rawPath := filepath.Join(goldenDir, c.ID+".raw.json")
+		rawPath := filepath.Join(outDir, pc.id+".raw.json")
 		if err := os.WriteFile(rawPath, append(raw, '\n'), 0o644); err != nil {
 			return fmt.Errorf("writing %s: %w", rawPath, err)
 		}
 		norm, err := normalize(raw)
 		if err != nil {
-			return fmt.Errorf("normalizing %s: %w", c.ID, err)
+			return fmt.Errorf("normalizing %s: %w", pc.id, err)
 		}
-		normPath := filepath.Join(goldenDir, c.ID+".norm.json")
+		normPath := filepath.Join(outDir, pc.id+".norm.json")
 		if err := os.WriteFile(normPath, append(norm, '\n'), 0o644); err != nil {
 			return fmt.Errorf("writing %s: %w", normPath, err)
 		}
 
 		if isErrorResponse(raw) {
 			errCount++
-			fmt.Printf("[%2d/43] %-36s ERROR-RESPONSE (%d bytes raw)\n", i+1, c.ID, len(raw))
+			fmt.Printf("[%2d/%d] %-36s ERROR-RESPONSE (%d bytes raw)\n", i+1, len(planned), pc.id, len(raw))
 		} else {
 			okCount++
-			fmt.Printf("[%2d/43] %-36s ok (%d bytes raw)\n", i+1, c.ID, len(raw))
+			fmt.Printf("[%2d/%d] %-36s ok (%d bytes raw)\n", i+1, len(planned), pc.id, len(raw))
 		}
 	}
 	fmt.Printf("\ncapture done in %s: %d ok, %d error responses, %d hard failures\n",
@@ -1021,6 +1079,178 @@ func capture() error {
 		return fmt.Errorf("%d cases failed to capture", len(failures))
 	}
 	return nil
+}
+
+// ---------------------------------------------------------------------------
+// compare
+// ---------------------------------------------------------------------------
+
+// knownDiffs are case ids whose v1 and v2 goldens are EXPECTED to differ; they
+// are printed as "KNOWN-DIFF <id>" and do not count as failures. Every entry
+// must carry the reason it is expected.
+//
+// This list is deliberately hardcoded rather than derived: a new diff appearing
+// in any other case is a real regression signal and must stay visible.
+var knownDiffs = map[string]string{
+	// The old server ran without --enable-exec, so the old exec tools were not
+	// registered and the call failed with a transport-level "unknown tool".
+	// The merged surface always registers planChange, which refuses the execPod
+	// operation at runtime with an explicit --enable-exec error.
+	"execPodPlan": "old server ran without --enable-exec (unknown tool); merged surface returns the explicit --enable-exec error",
+	"execPod":     "old server ran without --enable-exec (unknown tool); merged surface returns the explicit --enable-exec error",
+	// The v1 corpus predates the plan-note rewrite: the old plan responses
+	// carried a `note` naming the then-current per-operation write tool
+	// ("call createProject with this confirmationToken"); the merged surface
+	// names the operation instead ("call executeChange with
+	// operation=createProject ..."). The note is wire-visible, so these seven
+	// plan cases differ for a reason that is part of the intended refactor.
+	// Exactly the plan cases whose v1 golden contains a confirmation.note are
+	// listed: createCustomClusterPlan and execPodPlan mint no note and are
+	// covered by their own entries below.
+	"createKubernetesResourcePlan": "v1 note names the deleted per-operation tool; the merged surface names executeChange with operation=createKubernetesResource",
+	"patchKubernetesResourcePlan":  "v1 note names the deleted per-operation tool; the merged surface names executeChange with operation=patchKubernetesResource",
+	"deleteKubernetesResourcePlan": "v1 note names the deleted per-operation tool; the merged surface names executeChange with operation=deleteKubernetesResource",
+	"createProjectPlan":            "v1 note names the deleted per-operation tool; the merged surface names executeChange with operation=createProject",
+	"createImportedClusterPlan":    "v1 note names the deleted per-operation tool; the merged surface names executeChange with operation=createImportedCluster",
+	"createK3kClusterPlan":         "v1 note names the deleted per-operation tool; the merged surface names executeChange with operation=createK3kCluster",
+	"scaleClusterNodePoolPlan":     "v1 note names the deleted per-operation tool; the merged surface names executeChange with operation=scaleClusterNodePool",
+	// These v1 goldens are TLS failures against the deployment's KDM endpoint
+	// (self-signed cert), not tool behavior: the response depends on the
+	// environment the server runs in, not on the refactor.
+	"listSupportedKubernetesVersions": "v1 golden is an environment-dependent TLS error from the KDM endpoint",
+	"createCustomClusterPlan":         "v1 golden is an environment-dependent TLS error from the KDM endpoint",
+}
+
+// compareResult summarizes one compare run.
+type compareResult struct {
+	Shared      int
+	OK          int
+	Diff        int
+	KnownDiff   int
+	OnlyV1      []string
+	OnlyV2      []string
+	Regressions []string
+}
+
+// compare byte-compares the .norm.json goldens of every case id present in both
+// v1/ and v2/ and prints OK / DIFF / KNOWN-DIFF per case. It only reports; it
+// never writes to the golden corpus.
+func compare() error {
+	// A missing corpus directory is the normal first-run mistake, so say what
+	// to run instead of leaking a bare ENOENT.
+	v1, err := normFiles(goldenDirV1)
+	if err != nil {
+		if errors.Is(err, os.ErrNotExist) {
+			return fmt.Errorf("%s: no golden corpus yet (run 'baseline capture' first)", goldenDirV1)
+		}
+		return err
+	}
+	v2, err := normFiles(goldenDirV2)
+	if err != nil {
+		if errors.Is(err, os.ErrNotExist) {
+			return fmt.Errorf("%s: no v2 corpus yet (run 'baseline capture -v2' first)", goldenDirV2)
+		}
+		return err
+	}
+	if len(v1) == 0 {
+		return fmt.Errorf("%s: no .norm.json files (run 'baseline capture' first)", goldenDirV1)
+	}
+	if len(v2) == 0 {
+		return fmt.Errorf("%s: no .norm.json files (run 'baseline capture -v2' first)", goldenDirV2)
+	}
+
+	res, err := compareGoldens(v1, v2, os.Stdout)
+	if err != nil {
+		return err
+	}
+	if res.Diff > 0 {
+		return fmt.Errorf("%d unexpected diffs: %s", res.Diff, strings.Join(res.Regressions, ", "))
+	}
+	return nil
+}
+
+// compareGoldens diffs two case id -> norm-file-path maps, writing one line per
+// shared case to w and returning the tally. Split out of compare so the diff
+// policy (including the knownDiffs allowlist) is unit-testable without a golden
+// corpus on disk.
+func compareGoldens(v1, v2 map[string]string, w io.Writer) (compareResult, error) {
+	var res compareResult
+
+	ids := make([]string, 0, len(v1))
+	for id := range v1 {
+		if _, ok := v2[id]; ok {
+			ids = append(ids, id)
+		} else {
+			res.OnlyV1 = append(res.OnlyV1, id)
+		}
+	}
+	for id := range v2 {
+		if _, ok := v1[id]; !ok {
+			res.OnlyV2 = append(res.OnlyV2, id)
+		}
+	}
+	sort.Strings(ids)
+	sort.Strings(res.OnlyV1)
+	sort.Strings(res.OnlyV2)
+	res.Shared = len(ids)
+
+	for _, id := range ids {
+		same, err := sameFile(v1[id], v2[id])
+		if err != nil {
+			return res, fmt.Errorf("case %s: %w", id, err)
+		}
+		switch {
+		case same:
+			res.OK++
+			fmt.Fprintf(w, "OK         %s\n", id)
+		case knownDiffs[id] != "":
+			res.KnownDiff++
+			fmt.Fprintf(w, "KNOWN-DIFF %s (%s)\n", id, knownDiffs[id])
+		default:
+			res.Diff++
+			res.Regressions = append(res.Regressions, id)
+			fmt.Fprintf(w, "DIFF       %s\n", id)
+		}
+	}
+
+	fmt.Fprintf(w, "\ncompare done: %d OK, %d DIFF, %d KNOWN-DIFF (of %d shared cases)\n",
+		res.OK, res.Diff, res.KnownDiff, res.Shared)
+	if len(res.OnlyV1) > 0 {
+		fmt.Fprintf(w, "only in v1 (%d): %s\n", len(res.OnlyV1), strings.Join(res.OnlyV1, ", "))
+	}
+	if len(res.OnlyV2) > 0 {
+		fmt.Fprintf(w, "only in v2 (%d): %s\n", len(res.OnlyV2), strings.Join(res.OnlyV2, ", "))
+	}
+	return res, nil
+}
+
+// normFiles maps case id -> path of its .norm.json golden in dir.
+func normFiles(dir string) (map[string]string, error) {
+	entries, err := os.ReadDir(dir)
+	if err != nil {
+		return nil, fmt.Errorf("reading %s: %w", dir, err)
+	}
+	out := make(map[string]string, len(entries))
+	for _, e := range entries {
+		if e.IsDir() || !strings.HasSuffix(e.Name(), ".norm.json") {
+			continue
+		}
+		out[strings.TrimSuffix(e.Name(), ".norm.json")] = filepath.Join(dir, e.Name())
+	}
+	return out, nil
+}
+
+// sameFile reports whether two files have identical bytes.
+func sameFile(a, b string) (bool, error) {
+	ba, err := os.ReadFile(a)
+	if err != nil {
+		return false, fmt.Errorf("reading %s: %w", a, err)
+	}
+	bb, err := os.ReadFile(b)
+	if err != nil {
+		return false, fmt.Errorf("reading %s: %w", b, err)
+	}
+	return bytes.Equal(ba, bb), nil
 }
 
 // isErrorResponse reports whether the serialized CallToolResult is an error.

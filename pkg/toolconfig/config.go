@@ -12,7 +12,9 @@ type Config struct {
 	// confirmation token and user confirmation. Delete and exec tools are
 	// NEVER exempted. Enable only for trusted automation.
 	AutoWrite bool
-	// EnableExec registers the execPod tools (off by default).
+	// EnableExec enables the execPod operation of planChange/executeChange
+	// (off by default). It changes operation availability, not tool count:
+	// the merged surface registers the same tools either way.
 	EnableExec bool
 	// Gate is the confirmation gate shared by all mutating tools.
 	Gate *confirm.Gate

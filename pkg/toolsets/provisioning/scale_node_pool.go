@@ -27,7 +27,7 @@ type scaleNodePoolParameters struct {
 	AmountToAdd      int    `json:"amountToAdd,omitempty" jsonschema:"the amount of nodes to add to the node pool. If specified, desiredSize will be ignored. Cannot be used with amountToSubtract. If no specific amount is provided, use zero"`
 	AmountToSubtract int    `json:"amountToSubtract,omitempty" jsonschema:"the amount of nodes to remove from the node pool. If specified, desiredSize will be ignored. Cannot be used with amountToAdd. If no specific amount is provided, use zero"`
 
-	ConfirmationToken string `json:"confirmationToken,omitempty" jsonschema:"REQUIRED (unless the server runs in auto-write mode): the single-use confirmationToken returned by scaleClusterNodePoolPlan for THIS exact operation. Never invent, reuse, or guess a token"`
+	ConfirmationToken string `json:"confirmationToken,omitempty" jsonschema:"REQUIRED (unless the server runs in auto-write mode): the single-use confirmationToken returned by planChange (operation scaleClusterNodePool) for THIS exact operation. Never invent, reuse, or guess a token"`
 }
 
 // scaleClusterNodePool changes the size of an existing node pool. The execution

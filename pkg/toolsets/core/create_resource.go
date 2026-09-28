@@ -23,7 +23,7 @@ type createKubernetesResourceParams struct {
 	Kind              string `json:"kind" jsonschema:"the type of Kubernetes resource (e.g., Pod, Deployment, or any custom resource kind). It must match the manifest's kind"`
 	Cluster           string `json:"cluster" jsonschema:"the name of the Kubernetes cluster"`
 	Manifest          string `json:"manifest" jsonschema:"the resource to create as a complete Kubernetes manifest, in YAML or JSON. The GVR is resolved from the manifest's own apiVersion and kind, so any custom resource is supported"`
-	ConfirmationToken string `json:"confirmationToken,omitempty" jsonschema:"REQUIRED (unless the server runs in auto-write mode): the single-use confirmationToken returned by createKubernetesResourcePlan for THIS exact operation. Never invent, reuse, or guess a token"`
+	ConfirmationToken string `json:"confirmationToken,omitempty" jsonschema:"REQUIRED (unless the server runs in auto-write mode): the single-use confirmationToken returned by planChange (operation createKubernetesResource) for THIS exact operation. Never invent, reuse, or guess a token"`
 }
 
 // parseCreateManifest parses and validates the manifest of a create request. The

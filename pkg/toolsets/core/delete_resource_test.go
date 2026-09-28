@@ -244,6 +244,8 @@ func TestDeletePlanIncludesSnapshotAndToken(t *testing.T) {
 	assert.Equal(t, map[string]any{"key1": "value1"}, parsed.Plan[0].Payload["data"])
 
 	require.NotEmpty(t, parsed.Confirmation.Token, "plan response must carry a confirmationToken")
+	assert.Contains(t, parsed.Confirmation.Note, "executeChange with operation=deleteKubernetesResource",
+		"the plan note must direct the agent to the executeChange operation, not a deleted tool")
 	assert.Contains(t, parsed.Confirmation.Note, "WILL BE PERMANENTLY DELETED")
 
 	require.NoError(t, gate.RequireToken(confirm.Operation{

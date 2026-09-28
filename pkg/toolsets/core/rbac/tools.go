@@ -3,17 +3,10 @@ package rbac
 import (
 	"context"
 
-	"github.com/modelcontextprotocol/go-sdk/mcp"
 	"github.com/rancher/rancher-ai-mcp/pkg/client"
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 	"k8s.io/apimachinery/pkg/runtime/schema"
 	"k8s.io/client-go/dynamic"
-	"k8s.io/utils/ptr"
-)
-
-const (
-	toolsSet    = "rancher"
-	toolsSetAnn = "toolset"
 )
 
 type toolsClient interface {
@@ -37,61 +30,7 @@ func NewTools(client toolsClient, readOnly bool) *Tools {
 	}
 }
 
-// AddTools registers all RBAC tools with the provided MCP server.
-func (t *Tools) AddTools(mcpServer *mcp.Server) {
-	mcp.AddTool(mcpServer, &mcp.Tool{
-		Name: "listClusterRoleTemplateBindings",
-		Meta: map[string]any{
-			toolsSetAnn: toolsSet,
-		},
-		Annotations: &mcp.ToolAnnotations{ReadOnlyHint: true, OpenWorldHint: ptr.To(false)},
-		Description: `List all cluster role template bindings (CRTBs) in a Rancher cluster.
-		If a user ID is specified only returns CRTBs for that user.
-		CRTBs provide users permissions as specified by a RoleTemplate at the cluster level.`},
-		t.listClusterRoleTemplateBindings,
-	)
-	mcp.AddTool(mcpServer, &mcp.Tool{
-		Name: "listProjectRoleTemplateBindings",
-		Meta: map[string]any{
-			toolsSetAnn: toolsSet,
-		},
-		Annotations: &mcp.ToolAnnotations{ReadOnlyHint: true, OpenWorldHint: ptr.To(false)},
-		Description: `List all project role template bindings (PRTBs) in a Rancher cluster.
-		If a user ID is specified only returns PRTBs for that user.
-		If a project ID is specified only returns PRTBs for that project.
-		PRTBs provide users permissions as specified by a RoleTemplate in a project.`},
-		t.listProjectRoleTemplateBindings,
-	)
-	mcp.AddTool(mcpServer, &mcp.Tool{
-		Name: "listRoleTemplates",
-		Meta: map[string]any{
-			toolsSetAnn: toolsSet,
-		},
-		Annotations: &mcp.ToolAnnotations{ReadOnlyHint: true, OpenWorldHint: ptr.To(false)},
-		InputSchema: map[string]any{
-			"type":       "object",
-			"properties": map[string]any{},
-		},
-		Description: `List all role templates in a Rancher cluster.
-		Role templates define a set of permissions that can be assigned to users or groups.`},
-		t.listRoleTemplates,
-	)
-	mcp.AddTool(mcpServer, &mcp.Tool{
-		Name: "getUser",
-		Meta: map[string]any{
-			toolsSetAnn: toolsSet,
-		},
-		Annotations: &mcp.ToolAnnotations{ReadOnlyHint: true, OpenWorldHint: ptr.To(false)},
-		Description: `Get a user ID by username.`},
-		t.getUser,
-	)
-	mcp.AddTool(mcpServer, &mcp.Tool{
-		Name: "getRoleTemplate",
-		Meta: map[string]any{
-			toolsSetAnn: toolsSet,
-		},
-		Annotations: &mcp.ToolAnnotations{ReadOnlyHint: true, OpenWorldHint: ptr.To(false)},
-		Description: `Get a role template by name.`},
-		t.getRoleTemplate,
-	)
-}
+// The RBAC tools have no AddTools method: listClusterRoleTemplateBindings,
+// listProjectRoleTemplateBindings, listRoleTemplates, getUser and
+// getRoleTemplate are exposed as cases of the merged rancherQuery tool, all of
+// them read-only. The Tools type only holds the handlers and their client.

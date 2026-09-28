@@ -7,13 +7,16 @@ resources:
 # Uncommenting this block appends privileges to the mcp container's args.
 # Each entry you keep must be a deliberate operator decision:
 #
-#   --allow-auto-write  lets create/update-class tools (createKubernetesResource,
-#                       patchKubernetesResource, createProject, createCustomCluster,
-#                       createImportedCluster, createK3kCluster, scaleClusterNodePool)
+#   --allow-auto-write  lets the create/update-class operations (operation:
+#                       createKubernetesResource, patchKubernetesResource,
+#                       createProject, createCustomCluster, createImportedCluster,
+#                       createK3kCluster, scaleClusterNodePool) of executeChange
 #                       execute WITHOUT the per-operation user confirmation.
 #                       For trusted automation only.
-#   --enable-exec       registers execPod/execPodPlan, which run arbitrary commands
-#                       inside a pod container.
+#   --enable-exec       enables the execPod operation of planChange/executeChange,
+#                       which runs arbitrary commands inside a pod container.
+#                       It does not change the tool surface: without it the
+#                       operation is refused at runtime.
 #
 # deleteKubernetesResource and execPod remain fully gated regardless: even in
 # auto-write mode they still require a fresh plan, the single-use

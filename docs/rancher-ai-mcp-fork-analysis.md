@@ -394,6 +394,11 @@ func (t *Tools) execPod(ctx context.Context, ...) {
 
 ## 8. 附：当前完整工具清单（v0.36.4 TOOLS.md 摘要）
 
+> **注**：本节的 43 工具清单是**调研时上游 v0.36.4 的快照**，不是本 fork 现在的工具面。
+> 本 fork 已把工具面合并为 7 个（`rancherQuery` / `diagnose` / `planChange` / `executeChange` /
+> `getKubernetesResource` / `listKubernetesResources` / `listAPIResources`），
+> 以 [TOOLS.md](../TOOLS.md) 为准。
+
 | Toolset | 工具 | 访问 |
 |---------|------|------|
 | fleet | analyzeFleetResources / getBundle / getGitRepo / listGitRepos | RO |

@@ -37,6 +37,8 @@ func TestCreateK3kClusterPlanToken(t *testing.T) {
 	raw := result.Content[0].(*mcp.TextContent).Text
 	require.NoError(t, json.Unmarshal([]byte(raw), &parsed))
 	require.NotEmpty(t, parsed.Confirmation.Token, "plan response must carry a confirmationToken")
+	assert.Contains(t, parsed.Confirmation.Note, "executeChange with operation=createK3kCluster",
+		"the plan note must direct the agent to the executeChange operation, not a deleted tool")
 	require.Len(t, parsed.Plan, 1)
 	assert.Equal(t, "min-cluster", parsed.Plan[0]["resource"].(map[string]any)["name"])
 	assert.WithinDuration(t, time.Now().Add(gate.TokenTTL), parsed.Confirmation.ExpiresAt, time.Minute)

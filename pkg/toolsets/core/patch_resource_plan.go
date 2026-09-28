@@ -102,7 +102,7 @@ func (t *Tools) updateKubernetesResourcePlan(ctx context.Context, toolReq *mcp.C
 	mcpResponse, err := response.CreatePlanResponse(planResources, &response.Confirmation{
 		Token:     token,
 		ExpiresAt: time.Now().Add(t.cfg.Gate.TokenTTL).UTC(),
-		Note:      "Show this plan to the user. Only after their explicit approval, call patchKubernetesResource with this confirmationToken. The token is single-use and expires in 10 minutes.",
+		Note:      "Show this plan to the user. Only after their explicit approval, call executeChange with operation=patchKubernetesResource and this confirmationToken. The token is single-use and expires in 10 minutes.",
 	})
 	if err != nil {
 		zap.L().Error("failed to create plan response", zap.String("tool", "updateKubernetesResource_plan"), zap.Error(err))

@@ -87,7 +87,7 @@ func (t *Tools) execPodPlan(ctx context.Context, _ *mcp.CallToolRequest, params 
 	plan, err := response.CreatePlanResponse([]response.PlanResource{planResource}, &response.Confirmation{
 		Token:     token,
 		ExpiresAt: time.Now().Add(t.cfg.Gate.TokenTTL).UTC(),
-		Note:      "Show the user the exact command that WILL RUN inside the pod. Only after their explicit approval call execPod with this confirmationToken. The user is asked directly to approve the exact command. The token is single-use and expires in 10 minutes.",
+		Note:      "Show the user the exact command that WILL RUN inside the pod. Only after their explicit approval call executeChange with operation=execPod and this confirmationToken. The user is asked directly to approve the exact command. The token is single-use and expires in 10 minutes.",
 	})
 	if err != nil {
 		zap.L().Error("failed to create plan response", zap.String("tool", "execPodPlan"), zap.Error(err))

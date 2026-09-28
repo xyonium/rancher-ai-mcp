@@ -44,7 +44,7 @@ type createK3kClusterParams struct {
 	WorkerLimit   ResourceLimits    `json:"workerLimit,omitempty" jsonschema:"resource constraints for worker nodes (contains cpu and memory strings)"`
 	Persistence   PersistenceConfig `json:"persistence,omitempty" jsonschema:"storage settings for etcd data (contains type, storageClassName, storageRequest strings)"`
 
-	ConfirmationToken string `json:"confirmationToken,omitempty" jsonschema:"REQUIRED (unless the server runs in auto-write mode): the single-use confirmationToken returned by createK3kClusterPlan for THIS exact operation. Never invent, reuse, or guess a token"`
+	ConfirmationToken string `json:"confirmationToken,omitempty" jsonschema:"REQUIRED (unless the server runs in auto-write mode): the single-use confirmationToken returned by planChange (operation createK3kCluster) for THIS exact operation. Never invent, reuse, or guess a token"`
 }
 
 // createK3kClusterObj builds the unstructured K3k Cluster object from the given parameters.

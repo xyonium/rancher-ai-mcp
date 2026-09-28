@@ -51,7 +51,7 @@ func (t *Tools) createK3kClusterPlan(_ context.Context, toolReq *mcp.CallToolReq
 	mcpResponse, err := response.CreatePlanResponse([]response.PlanResource{createResource}, &response.Confirmation{
 		Token:     token,
 		ExpiresAt: time.Now().Add(t.cfg.Gate.TokenTTL).UTC(),
-		Note:      "Show this plan to the user. Only after their explicit approval, call createK3kCluster with this confirmationToken. The token is single-use and expires in 10 minutes.",
+		Note:      "Show this plan to the user. Only after their explicit approval, call executeChange with operation=createK3kCluster and this confirmationToken. The token is single-use and expires in 10 minutes.",
 	})
 	if err != nil {
 		log.Error("failed to create plan response", zap.Error(err))

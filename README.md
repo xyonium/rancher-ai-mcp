@@ -21,7 +21,8 @@ This Model Context Protocol (MCP) server provides a secure bridge between the Ra
 
 - **`pkg/toolsets/`** - Tool registration and organization
   - `toolsets.go` - Central registry for tool collections
-  - `core/` - Core Kubernetes operation tools
+  - `merged/` - The only registration surface: the 7 tools exposed by the server
+  - `core/`, `fleet/`, `provisioning/` - Per-domain operation handlers dispatched by the merged tools
 
 - **`pkg/response/`** - Response formatting utilities
   - Structured text and content generation for MCP responses
@@ -34,7 +35,8 @@ This Model Context Protocol (MCP) server provides a secure bridge between the Ra
 The server is designed with a modular toolset architecture to support a **multi-agent system**. Each toolset contains a collection of related tools that serve a specific agent or domain within the Rancher AI ecosystem.
 
 **Current Toolsets:**
-- **`core`** - Fundamental Kubernetes operations (resource management, pod inspection, metrics)
+- **`merged`** - The consolidated surface: `rancherQuery`, `diagnose`, `planChange` and `executeChange`. Each one dispatches an enum parameter to the per-domain handlers.
+- **`rancher`** - The K8s-generic tools: `getKubernetesResource`, `listKubernetesResources`, `listAPIResources`.
 
 This architecture allows different AI agents to access only the tools they need, improving security, maintainability, and scalability. 
 
@@ -77,22 +79,25 @@ make generate
 Every tool that modifies cluster state or executes commands is gated by the
 server, not the client:
 
-1. The agent must call the matching `*Plan` tool first. The plan response
-   contains a single-use, 10-minute `confirmationToken` bound to the exact
-   operation (HMAC-signed; any parameter change invalidates it).
-2. On the Write call, the server asks the USER directly to confirm via MCP
-   elicitation. `deleteKubernetesResource` additionally requires the user to
-   type the exact resource name.
-3. If the client does not support elicitation, Write calls fail closed.
-   `deleteKubernetesResource` and `execPod` are never exempted.
+1. The agent must call `planChange` first, with the operation and parameters it
+   intends to execute. The plan response contains a single-use, 10-minute
+   `confirmationToken` bound to the exact operation and parameters
+   (HMAC-signed; any parameter change invalidates it).
+2. The agent then calls `executeChange` with the same operation and parameters
+   plus the token. The server asks the USER directly to confirm via MCP
+   elicitation. The `deleteKubernetesResource` operation additionally requires
+   the user to type the exact resource name.
+3. If the client does not support elicitation, `executeChange` fails closed.
+   The `deleteKubernetesResource` and `execPod` operations are never exempted,
+   not even in auto-write mode.
 
 ### Flags and environment variables
 
 | Flag | Env | Default | Effect |
 |------|-----|---------|--------|
-| `--read-only` | — | false | register only read-only tools |
-| `--allow-auto-write` | `MCP_ALLOW_AUTO_WRITE` | false | create/update-class tools skip the token and confirmation (delete/exec unaffected). For trusted automation only |
-| `--enable-exec` | `MCP_ENABLE_EXEC` | false | register `execPod`/`execPodPlan` |
+| `--read-only` | — | false | register only read-only tools (5 of 7; `planChange`/`executeChange` unregistered) |
+| `--allow-auto-write` | `MCP_ALLOW_AUTO_WRITE` | false | create/update-class operations skip the token and confirmation (delete/exec unaffected). For trusted automation only |
+| `--enable-exec` | `MCP_ENABLE_EXEC` | false | allow the `execPod` operation of `planChange`/`executeChange` (refused at runtime without it) |
 
 ## Deploying this fork with the stock rancher-ai-agent Helm chart
 
@@ -104,12 +109,13 @@ so the supported delivery paths are:
 
    | Tag | `MCP_ALLOW_AUTO_WRITE` | Behavior |
    |-----|----------------------|----------|
-   | `latest`, `<sha>`, `vX.Y.Z` | `false` | every write requires plan-token + user confirmation |
-   | `auto`, `<sha>-auto`, `vX.Y.Z-auto` | `true` | create/update-class tools execute without confirmation; delete/exec still always gated |
+   | `latest`, `<sha>`, `vX.Y.Z` | `false` | every change requires plan-token + user confirmation |
+   | `auto`, `<sha>-auto`, `vX.Y.Z-auto` | `true` | create/update-class operations execute without confirmation; delete/exec still always gated |
 
    The repository Actions variable `MCP_ENABLE_EXEC` (default unset = `false`) is baked into BOTH
-   image tags, including `latest`: setting it to `true` ships `execPod` registration in the safe
-   tag too. Exec stays fully confirmation-gated in every mode either way.
+   image tags, including `latest`: setting it to `true` enables the `execPod` operation of
+   `planChange`/`executeChange` in the safe tag too. Exec stays fully confirmation-gated in every
+   mode either way.
 
    `latest` and `auto` are floating tags, and the chart's default `imagePullPolicy: IfNotPresent`
    means a node-local cached image is not refreshed on upgrade. For reproducible upgrades, pin an

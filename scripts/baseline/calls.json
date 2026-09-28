@@ -177,7 +177,7 @@
     "id": "scaleClusterNodePoolPlan",
     "tool": "scaleClusterNodePoolPlan",
     "params": { "cluster": "${discovered.cluster}", "namespace": "${discovered.nodePoolNamespace}", "nodePoolName": "${discovered.nodePoolName}", "desiredSize": 1 },
-    "mapsTo": { "tool": "planChange", "params": { "operation": "scaleClusterNodePool", "cluster": "${discovered.cluster}", "namespace": "${discovered.nodePoolNamespace}", "name": "${discovered.nodePoolName}", "desiredSize": 1 } }
+    "mapsTo": { "tool": "planChange", "params": { "operation": "scaleClusterNodePool", "cluster": "${discovered.cluster}", "namespace": "${discovered.nodePoolNamespace}", "nodePoolName": "${discovered.nodePoolName}", "desiredSize": 1 } }
   },
   {
     "id": "execPodPlan",
@@ -231,7 +231,7 @@
     "id": "scaleClusterNodePool",
     "tool": "scaleClusterNodePool",
     "params": { "cluster": "${discovered.cluster}", "namespace": "${discovered.nodePoolNamespace}", "nodePoolName": "${discovered.nodePoolName}", "desiredSize": 1, "confirmationToken": "invalid-baseline-token" },
-    "mapsTo": { "tool": "executeChange", "params": { "operation": "scaleClusterNodePool", "cluster": "${discovered.cluster}", "namespace": "${discovered.nodePoolNamespace}", "name": "${discovered.nodePoolName}", "desiredSize": 1, "confirmationToken": "invalid-baseline-token" } }
+    "mapsTo": { "tool": "executeChange", "params": { "operation": "scaleClusterNodePool", "cluster": "${discovered.cluster}", "namespace": "${discovered.nodePoolNamespace}", "nodePoolName": "${discovered.nodePoolName}", "desiredSize": 1, "confirmationToken": "invalid-baseline-token" } }
   },
   {
     "id": "execPod",

@@ -432,6 +432,8 @@ func TestExecPlanIncludesCommandAndToken(t *testing.T) {
 	assert.Equal(t, []string{"ls", "-la", "/etc"}, parsed.Plan[0].Payload.Command)
 
 	require.NotEmpty(t, parsed.Confirmation.Token, "plan response must carry a confirmationToken")
+	assert.Contains(t, parsed.Confirmation.Note, "executeChange with operation=execPod",
+		"the plan note must direct the agent to the executeChange operation, not a deleted tool")
 	assert.Contains(t, parsed.Confirmation.Note, "exact command")
 
 	// The token binds the pod and the exact command — the container is display

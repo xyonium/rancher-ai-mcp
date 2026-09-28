@@ -259,6 +259,8 @@ func TestCreateCustomClusterPlanToken(t *testing.T) {
 	require.NoError(t, json.Unmarshal([]byte(raw), &parsed))
 	require.NotEmpty(t, parsed.Confirmation.Token, "plan response must carry a confirmationToken")
 	require.Len(t, parsed.Plan, 1)
+	assert.Contains(t, parsed.Confirmation.Note, "executeChange with operation=createCustomCluster",
+		"the plan note must direct the agent to the executeChange operation, not a deleted tool")
 	assert.WithinDuration(t, time.Now().Add(gate.TokenTTL), parsed.Confirmation.ExpiresAt, time.Minute)
 
 	// The token binds the exact cluster object the execute tool submits.
