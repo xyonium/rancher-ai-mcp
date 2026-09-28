@@ -4,6 +4,7 @@ package merged
 import (
 	"context"
 	"encoding/json"
+	"os"
 	"reflect"
 	"slices"
 	"strings"
@@ -427,4 +428,115 @@ func assertKeys[P any](t *testing.T, name string, m map[string]dispatch.Case[P],
 	if !slices.Equal(got, want) {
 		t.Errorf("%s case keys = %v, want %v", name, got, want)
 	}
+}
+
+// ---------------------------------------------------------------------------
+// baseline mapping validation
+// ---------------------------------------------------------------------------
+
+// baselineCallsPath is the committed case matrix of the post-deploy baseline
+// harness. Its mapsTo mappings replay each pre-refactor tool call onto the
+// merged surface; nothing else validates them until the post-deploy run, where
+// a mapping mistake reads as a false regression.
+const baselineCallsPath = "../../../scripts/baseline/calls.json"
+
+// baselineCase mirrors the fields of scripts/baseline/calls.json that the
+// mapping validation needs. It is deliberately a separate struct from the
+// harness's callCase: that one lives in package main and cannot be imported.
+type baselineCase struct {
+	ID     string `json:"id"`
+	Tool   string `json:"tool"`
+	MapsTo struct {
+		Tool   string         `json:"tool"`
+		Params map[string]any `json:"params"`
+	} `json:"mapsTo"`
+}
+
+// baselineMapsToTool lists the tools a mapping may target. The three generic
+// Kubernetes tools take no dispatch enum; the four merged tools do.
+var baselineMapsToTool = map[string]bool{
+	"rancherQuery": true, "diagnose": true, "planChange": true, "executeChange": true,
+	"getKubernetesResource": true, "listKubernetesResources": true, "listAPIResources": true,
+}
+
+// TestBaselineMappingsDispatch pins that all 43 committed baseline mappings
+// reach the merged surface: every mapsTo.tool is a registered tool, and every
+// enum-dispatched mapping passes dispatch.Validate against the REAL case table
+// for its phase. Regressions this catches before the post-deploy run:
+//   - a mapping carrying the wrong parameter name (e.g. `name` where
+//     scaleClusterNodePool requires `nodePoolName`) — capture -v2 would record
+//     a validation error instead of exercising the handler;
+//   - an enum value dropped or renamed in dispatch.ChangeOperations (or the
+//     query/diagnose enums) without updating calls.json;
+//   - a required parameter added to a case table without updating calls.json.
+func TestBaselineMappingsDispatch(t *testing.T) {
+	raw, err := os.ReadFile(baselineCallsPath)
+	require.NoError(t, err, "the committed case matrix must be readable")
+	var cases []baselineCase
+	require.NoError(t, json.Unmarshal(raw, &cases))
+	require.Len(t, cases, 43, "the case matrix is the 43-case v1 corpus")
+
+	m := buildCaseMaps(&client.Client{}, toolconfig.Config{})
+	phases := map[string]map[string]dispatch.Case[dispatch.ChangeParams]{
+		"planChange":    m.plan,
+		"executeChange": m.execute,
+	}
+
+	checked := 0
+	for _, c := range cases {
+		require.NotEmpty(t, c.MapsTo.Tool, "case %s: mapsTo.tool must be set", c.ID)
+		require.True(t, baselineMapsToTool[c.MapsTo.Tool],
+			"case %s: mapsTo.tool %q is not a merged-surface tool", c.ID, c.MapsTo.Tool)
+
+		var err error
+		switch c.MapsTo.Tool {
+		case "planChange", "executeChange":
+			p := decodeMappedParams[dispatch.ChangeParams](t, c.MapsTo.Params)
+			cs, ok := phases[c.MapsTo.Tool][p.Operation]
+			if !ok {
+				t.Errorf("case %s: %s has no operation %q", c.ID, c.MapsTo.Tool, p.Operation)
+				continue
+			}
+			// Validate mirrors Dispatch's pre-handler check: its error text
+			// names the missing parameter(s).
+			err = dispatch.Validate("operation", p.Operation, p, cs.Required)
+		case "rancherQuery":
+			p := decodeMappedParams[dispatch.QueryParams](t, c.MapsTo.Params)
+			cs, ok := m.query[p.Resource]
+			if !ok {
+				t.Errorf("case %s: rancherQuery has no resource %q", c.ID, p.Resource)
+				continue
+			}
+			err = dispatch.Validate("resource", p.Resource, p, cs.Required)
+		case "diagnose":
+			p := decodeMappedParams[dispatch.DiagnoseParams](t, c.MapsTo.Params)
+			cs, ok := m.diagnose[p.Target]
+			if !ok {
+				t.Errorf("case %s: diagnose has no target %q", c.ID, p.Target)
+				continue
+			}
+			err = dispatch.Validate("target", p.Target, p, cs.Required)
+		default:
+			// The three generic tools take no enum; their mappings must at
+			// least be targeted at the tool they came from.
+			require.Equal(t, c.Tool, c.MapsTo.Tool,
+				"case %s: a generic-tool mapping must map to itself", c.ID)
+		}
+		require.NoError(t, err, "case %s: mapping does not dispatch", c.ID)
+		checked++
+	}
+	require.Equal(t, 43, checked, "every case must be validated")
+}
+
+// decodeMappedParams reproduces what the wire decode does to a calls.json
+// params object: marshal to JSON, unmarshal into the typed params struct.
+// Going through JSON (not a field-by-field copy) is what proves the mapping's
+// JSON key names are the ones dispatch.Validate reflects over.
+func decodeMappedParams[P any](t *testing.T, params map[string]any) P {
+	t.Helper()
+	var p P
+	b, err := json.Marshal(params)
+	require.NoError(t, err)
+	require.NoError(t, json.Unmarshal(b, &p))
+	return p
 }

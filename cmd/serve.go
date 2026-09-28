@@ -55,7 +55,7 @@ func init() {
 	serveCmd.Flags().BoolVar(&insecure, "insecure", false, "Skip TLS verification")
 	serveCmd.Flags().BoolVar(&readOnly, "read-only", false, "Only register read-only tools")
 	serveCmd.Flags().BoolVar(&allowAutoWrite, "allow-auto-write", false, "Allow create/update-class tools to execute without per-operation user confirmation (env MCP_ALLOW_AUTO_WRITE). Delete and exec always require confirmation. DANGEROUS: enable only for trusted automation")
-	serveCmd.Flags().BoolVar(&enableExec, "enable-exec", false, "Register the execPod tools (env MCP_ENABLE_EXEC). Disabled by default")
+	serveCmd.Flags().BoolVar(&enableExec, "enable-exec", false, "Enable the execPod operation of planChange/executeChange (env MCP_ENABLE_EXEC). The tool surface does not change: without this flag the operation is refused at runtime. Disabled by default")
 
 	serveCmd.Flags().StringVar(&authzServerURL, "authz-server-url", "", "Authorization Server URL - used to generate the OIDC urls")
 	serveCmd.Flags().StringVar(&jwksURL, "jwks-url", "", "JWKS URL - from the OAuth2 server")

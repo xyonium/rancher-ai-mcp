@@ -950,6 +950,37 @@ type callCase struct {
 	} `json:"mapsTo"`
 }
 
+// plannedCall is one fully-resolved call of a capture run.
+type plannedCall struct {
+	id     string
+	tool   string
+	params map[string]any
+}
+
+// planCalls resolves each case to the tool+params this run will call: v1 uses
+// the case's own tool/params, v2 uses the mapsTo mapping onto the merged
+// surface. A blank tool is a hard error — in v2 it would silently call the
+// empty tool name.
+func planCalls(cases []callCase, v2 bool) ([]plannedCall, error) {
+	planned := make([]plannedCall, 0, len(cases))
+	for _, c := range cases {
+		pc := plannedCall{id: c.ID, tool: c.Tool, params: c.Params}
+		if v2 {
+			pc.tool = c.MapsTo.Tool
+			pc.params = c.MapsTo.Params
+		}
+		if pc.tool == "" {
+			where := "case"
+			if v2 {
+				where = "mapsTo"
+			}
+			return nil, fmt.Errorf("case %s: no %s tool configured", c.ID, where)
+		}
+		planned = append(planned, pc)
+	}
+	return planned, nil
+}
+
 // capture runs the case matrix. In v1 mode (v2=false) it calls the case's own
 // tool/params (the old per-operation surface); in v2 mode it replays every case
 // through its mapsTo mapping onto the merged 7-tool surface. The goldens of the
@@ -989,30 +1020,9 @@ func capture(v2 bool) error {
 		return fmt.Errorf("%s: expected 43 cases, got %d", callsFile, len(cases))
 	}
 
-	// callCase + params for this run: v1 uses the case's own tool/params, v2
-	// uses the mapsTo mapping onto the merged surface.
-	type plannedCall struct {
-		id     string
-		tool   string
-		params map[string]any
-	}
-	planned := make([]plannedCall, 0, len(cases))
-	for _, c := range cases {
-		pc := plannedCall{id: c.ID, tool: c.Tool, params: c.Params}
-		if v2 {
-			pc.tool = c.MapsTo.Tool
-			pc.params = c.MapsTo.Params
-		}
-		if pc.tool == "" {
-			// A blank mapsTo in v2 mode would silently retarget the call to the
-			// empty tool name; fail loudly instead.
-			where := "case"
-			if v2 {
-				where = "mapsTo"
-			}
-			return fmt.Errorf("case %s: no %s tool configured", c.ID, where)
-		}
-		planned = append(planned, pc)
+	planned, err := planCalls(cases, v2)
+	if err != nil {
+		return err
 	}
 
 	outDir := goldenDirV1
@@ -1088,6 +1098,22 @@ var knownDiffs = map[string]string{
 	// operation at runtime with an explicit --enable-exec error.
 	"execPodPlan": "old server ran without --enable-exec (unknown tool); merged surface returns the explicit --enable-exec error",
 	"execPod":     "old server ran without --enable-exec (unknown tool); merged surface returns the explicit --enable-exec error",
+	// The v1 corpus predates the plan-note rewrite: the old plan responses
+	// carried a `note` naming the then-current per-operation write tool
+	// ("call createProject with this confirmationToken"); the merged surface
+	// names the operation instead ("call executeChange with
+	// operation=createProject ..."). The note is wire-visible, so these seven
+	// plan cases differ for a reason that is part of the intended refactor.
+	// Exactly the plan cases whose v1 golden contains a confirmation.note are
+	// listed: createCustomClusterPlan and execPodPlan mint no note and are
+	// covered by their own entries below.
+	"createKubernetesResourcePlan": "v1 note names the deleted per-operation tool; the merged surface names executeChange with operation=createKubernetesResource",
+	"patchKubernetesResourcePlan":  "v1 note names the deleted per-operation tool; the merged surface names executeChange with operation=patchKubernetesResource",
+	"deleteKubernetesResourcePlan": "v1 note names the deleted per-operation tool; the merged surface names executeChange with operation=deleteKubernetesResource",
+	"createProjectPlan":            "v1 note names the deleted per-operation tool; the merged surface names executeChange with operation=createProject",
+	"createImportedClusterPlan":    "v1 note names the deleted per-operation tool; the merged surface names executeChange with operation=createImportedCluster",
+	"createK3kClusterPlan":         "v1 note names the deleted per-operation tool; the merged surface names executeChange with operation=createK3kCluster",
+	"scaleClusterNodePoolPlan":     "v1 note names the deleted per-operation tool; the merged surface names executeChange with operation=scaleClusterNodePool",
 	// These v1 goldens are TLS failures against the deployment's KDM endpoint
 	// (self-signed cert), not tool behavior: the response depends on the
 	// environment the server runs in, not on the refactor.
