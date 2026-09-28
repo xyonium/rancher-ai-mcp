@@ -272,6 +272,17 @@ type discovered struct {
 	CustomResourceNS   string `json:"customResourceNamespace"`
 }
 
+// discover queries the merged tool surface: rancherQuery for Rancher
+// inventory reads, diagnose for diagnostics, listKubernetesResources for
+// generic Kubernetes listing. The pre-consolidation per-resource tools
+// (listClusters, analyzeCluster, ...) no longer exist; the equivalent
+// resource/target values are pinned by calls.json's mapsTo mappings.
+const (
+	toolRancherQuery = "rancherQuery"
+	toolDiagnose     = "diagnose"
+	toolListK8s      = "listKubernetesResources"
+)
+
 func discover() error {
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Minute)
 	defer cancel()
@@ -287,14 +298,14 @@ func discover() error {
 	defer session.Close()
 
 	d := &discovered{}
-	fmt.Println("== discovery: listClusters")
-	raw, err := callTool(ctx, session, "listClusters", map[string]any{})
+	fmt.Println("== discovery: rancherQuery (clusters)")
+	raw, err := callTool(ctx, session, toolRancherQuery, map[string]any{"resource": "clusters"})
 	if err != nil {
 		return err
 	}
 	clusters, err := parseList(raw)
 	if err != nil {
-		return fmt.Errorf("listClusters: %w", err)
+		return fmt.Errorf("rancherQuery(clusters): %w", err)
 	}
 	// Objects are K8s resources: name lives in metadata. The uiContext array
 	// (kind/cluster/name) is a more compact source, but metadata is enough.
@@ -321,16 +332,17 @@ func discover() error {
 		}
 	}
 	if d.Cluster == "" {
-		return fmt.Errorf("no cluster found via listClusters")
+		return fmt.Errorf("no cluster found via rancherQuery(clusters)")
 	}
 	fmt.Printf("   management cluster=%s\n", d.Cluster)
 
 	// The provisioning cluster (provisioning.cattle.io/cluster in
-	// fleet-default) is the name that tools like analyzeCluster and
-	// scaleClusterNodePool expect (it resolves via display-name lookup too).
+	// fleet-default) is the name that calls like diagnose(target=cluster) and
+	// the scaleClusterNodePool operation expect (it resolves via display-name
+	// lookup too).
 	// Prefer it as the primary cluster param when one exists.
 	fmt.Println("== discovery: provisioning clusters")
-	raw, err = callTool(ctx, session, "listKubernetesResources", map[string]any{
+	raw, err = callTool(ctx, session, toolListK8s, map[string]any{
 		"kind": "cluster", "apiVersion": "provisioning.cattle.io/v1",
 		"namespace": "fleet-default", "cluster": "local", "limit": 20, "offset": 0,
 	})
@@ -351,7 +363,7 @@ func discover() error {
 		// have none, which would leave machine/node-pool discovery empty).
 		chosen := provNames[0]
 		for _, name := range provNames {
-			mraw, merr := callTool(ctx, session, "analyzeClusterMachines", map[string]any{"cluster": name})
+			mraw, merr := callTool(ctx, session, toolDiagnose, map[string]any{"target": "machines", "cluster": name})
 			if merr != nil {
 				continue
 			}
@@ -365,14 +377,14 @@ func discover() error {
 	}
 	fmt.Printf("   cluster=%s managementID=%s\n", d.Cluster, d.ClusterID)
 
-	fmt.Println("== discovery: listProjects")
-	raw, err = callTool(ctx, session, "listProjects", map[string]any{"cluster": d.Cluster})
+	fmt.Println("== discovery: rancherQuery (projects)")
+	raw, err = callTool(ctx, session, toolRancherQuery, map[string]any{"resource": "projects", "cluster": d.Cluster})
 	if err != nil {
 		return err
 	}
 	projects, err := parseList(raw)
 	if err != nil {
-		return fmt.Errorf("listProjects: %w", err)
+		return fmt.Errorf("rancherQuery(projects): %w", err)
 	}
 	for _, p := range projects {
 		name := clusterName(p)
@@ -395,16 +407,16 @@ func discover() error {
 		}
 	}
 	if d.Project == "" {
-		return fmt.Errorf("no project found via listProjects")
+		return fmt.Errorf("no project found via rancherQuery(projects)")
 	}
 	fmt.Printf("   project=%s id=%s\n", d.Project, d.ProjectID)
 
 	// Fleet workspace: try common values until one yields GitRepos or an OK response.
-	fmt.Println("== discovery: listGitRepos (workspace probe)")
+	fmt.Println("== discovery: rancherQuery (gitRepos, workspace probe)")
 	d.Workspace = "fleet-default"
 	// We still record the probe even if there are no repos; error is fine.
 	for _, ws := range []string{"fleet-default", "fleet-local", "cattle-fleet-system"} {
-		raw, err = callTool(ctx, session, "listGitRepos", map[string]any{"workspace": ws})
+		raw, err = callTool(ctx, session, toolRancherQuery, map[string]any{"resource": "gitRepos", "workspace": ws})
 		if err != nil {
 			return err
 		}
@@ -437,7 +449,7 @@ func discover() error {
 		if c == "" {
 			continue
 		}
-		raw, err = callTool(ctx, session, "listKubernetesResources", map[string]any{
+		raw, err = callTool(ctx, session, toolListK8s, map[string]any{
 			"kind": "deployment", "limit": 5, "offset": 0,
 			"namespace": "", "cluster": c,
 		})
@@ -476,7 +488,7 @@ func discover() error {
 		if c == "" {
 			continue
 		}
-		raw, err = callTool(ctx, session, "listKubernetesResources", map[string]any{
+		raw, err = callTool(ctx, session, toolListK8s, map[string]any{
 			"kind": "pod", "limit": 5, "offset": 0,
 			"namespace": "", "cluster": c,
 		})
@@ -510,14 +522,14 @@ func discover() error {
 	fmt.Printf("   pod=%s/%s\n", d.PodNamespace, d.PodName)
 
 	// A real role template.
-	fmt.Println("== discovery: listRoleTemplates")
-	raw, err = callTool(ctx, session, "listRoleTemplates", map[string]any{})
+	fmt.Println("== discovery: rancherQuery (roleTemplates)")
+	raw, err = callTool(ctx, session, toolRancherQuery, map[string]any{"resource": "roleTemplates"})
 	if err != nil {
 		return err
 	}
 	roleTemplates, err := parseList(raw)
 	if err != nil {
-		return fmt.Errorf("listRoleTemplates: %w", err)
+		return fmt.Errorf("rancherQuery(roleTemplates): %w", err)
 	}
 	for _, rt := range roleTemplates {
 		name := clusterName(rt)
@@ -527,13 +539,13 @@ func discover() error {
 		}
 	}
 	if d.RoleTemplate == "" {
-		return fmt.Errorf("no role template found via listRoleTemplates")
+		return fmt.Errorf("no role template found via rancherQuery(roleTemplates)")
 	}
 	fmt.Printf("   roleTemplate=%s\n", d.RoleTemplate)
 
 	// Supported k8s versions (rke2 and k3s) — one entry each for synthetic plan params.
-	fmt.Println("== discovery: listSupportedKubernetesVersions")
-	raw, err = callTool(ctx, session, "listSupportedKubernetesVersions", map[string]any{"distribution": "rke2"})
+	fmt.Println("== discovery: rancherQuery (supportedVersions)")
+	raw, err = callTool(ctx, session, toolRancherQuery, map[string]any{"resource": "supportedVersions", "distribution": "rke2"})
 	if err != nil {
 		return err
 	}
@@ -544,8 +556,8 @@ func discover() error {
 	fmt.Printf("   rke2 versions: %d, picked %q\n", len(rke2Versions), d.Rke2Version)
 
 	// A username from CRTBs (best effort).
-	fmt.Println("== discovery: listClusterRoleTemplateBindings")
-	raw, err = callTool(ctx, session, "listClusterRoleTemplateBindings", map[string]any{"cluster": d.Cluster})
+	fmt.Println("== discovery: rancherQuery (clusterRTBs)")
+	raw, err = callTool(ctx, session, toolRancherQuery, map[string]any{"resource": "clusterRTBs", "cluster": d.Cluster})
 	if err != nil {
 		return err
 	}
@@ -553,8 +565,8 @@ func discover() error {
 	if perr == nil {
 		for _, crtb := range crtbs {
 			un, _ := crtb["userName"].(string)
-			// userName is a Rancher user ID (u-xxx); getUser takes a username,
-			// so also probe userPrincipalName as a fallback display name.
+			// userName is a Rancher user ID (u-xxx); the user query takes a
+			// username, so also probe userPrincipalName as a fallback display name.
 			if un != "" {
 				d.UserID = un
 				if pn, _ := crtb["userPrincipalName"].(string); pn != "" {
@@ -568,9 +580,9 @@ func discover() error {
 	}
 	fmt.Printf("   username=%s userID=%s\n", d.Username, d.UserID)
 
-	// Machine + node pool (best effort; analyzeClusterMachines covers the happy path).
-	fmt.Println("== discovery: analyzeClusterMachines")
-	raw, err = callTool(ctx, session, "analyzeClusterMachines", map[string]any{"cluster": d.Cluster})
+	// Machine + node pool (best effort; diagnose(target=machines) covers the happy path).
+	fmt.Println("== discovery: diagnose (machines)")
+	raw, err = callTool(ctx, session, toolDiagnose, map[string]any{"target": "machines", "cluster": d.Cluster})
 	if err != nil {
 		return err
 	}
@@ -592,11 +604,11 @@ func discover() error {
 	}
 	fmt.Printf("   machine=%s\n", d.MachineName)
 
-	// analyzeCluster output contains the provisioning cluster with
+	// diagnose(target=cluster) output contains the provisioning cluster with
 	// spec.kubernetesVersion (used as the plan param for cluster creation) and
 	// spec.rkeConfig.machinePools (node pool names).
-	fmt.Println("== discovery: analyzeCluster")
-	raw, err = callTool(ctx, session, "analyzeCluster", map[string]any{"cluster": d.Cluster})
+	fmt.Println("== discovery: diagnose (cluster)")
+	raw, err = callTool(ctx, session, toolDiagnose, map[string]any{"target": "cluster", "cluster": d.Cluster})
 	if err != nil {
 		return err
 	}
@@ -611,9 +623,9 @@ func discover() error {
 	}
 	fmt.Printf("   nodePool=%s/%s kubernetesVersion=%s\n", d.NodePoolNamespace, d.NodePoolName, d.Rke2Version)
 
-	// A bundle name for getBundle (best effort via analyzeFleetResources).
-	fmt.Println("== discovery: analyzeFleetResources")
-	raw, err = callTool(ctx, session, "analyzeFleetResources", map[string]any{"workspace": d.Workspace})
+	// A bundle name for the bundle query (best effort via diagnose(target=fleet)).
+	fmt.Println("== discovery: diagnose (fleet)")
+	raw, err = callTool(ctx, session, toolDiagnose, map[string]any{"target": "fleet", "workspace": d.Workspace})
 	if err != nil {
 		return err
 	}

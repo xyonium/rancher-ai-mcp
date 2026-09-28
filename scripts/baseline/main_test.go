@@ -1,11 +1,18 @@
 package main
 
 import (
+	"context"
 	"encoding/json"
 	"os"
 	"path/filepath"
 	"strings"
 	"testing"
+
+	"github.com/modelcontextprotocol/go-sdk/mcp"
+	"github.com/rancher/rancher-ai-mcp/pkg/client"
+	"github.com/rancher/rancher-ai-mcp/pkg/confirm"
+	"github.com/rancher/rancher-ai-mcp/pkg/toolconfig"
+	"github.com/rancher/rancher-ai-mcp/pkg/toolsets/merged"
 )
 
 // writeNorm writes a .norm.json golden named <id>.norm.json under dir.
@@ -265,6 +272,43 @@ func TestPlanNoteCasesAllowlisted(t *testing.T) {
 	for _, id := range []string{"createCustomClusterPlan", "execPodPlan"} {
 		if strings.Contains(knownDiffs[id], "note names") {
 			t.Errorf("%s has no v1 note; its exemption reason must not cite one", id)
+		}
+	}
+}
+
+// TestDiscoverToolsAreRegistered pins the tool names discover() calls to the
+// live merged surface: registration is the authoritative tool list, so a
+// future rename or removal fails here instead of at live-discovery time.
+func TestDiscoverToolsAreRegistered(t *testing.T) {
+	gate, err := confirm.NewGate()
+	if err != nil {
+		t.Fatal(err)
+	}
+	cfg := toolconfig.Config{Gate: gate}
+	server := mcp.NewServer(&mcp.Implementation{Name: "test", Version: "v0"}, nil)
+	merged.Register(&client.Client{}, server, cfg) // registration never calls the client
+
+	ct, st := mcp.NewInMemoryTransports()
+	if _, err := server.Connect(context.Background(), st, nil); err != nil {
+		t.Fatal(err)
+	}
+	mc := mcp.NewClient(&mcp.Implementation{Name: "c", Version: "v0"}, nil)
+	sess, err := mc.Connect(context.Background(), ct, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer sess.Close()
+	res, err := sess.ListTools(context.Background(), nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	registered := map[string]bool{}
+	for _, tool := range res.Tools {
+		registered[tool.Name] = true
+	}
+	for _, name := range []string{toolRancherQuery, toolDiagnose, toolListK8s} {
+		if !registered[name] {
+			t.Errorf("discover() calls tool %q, which is not in the registered surface", name)
 		}
 	}
 }
