@@ -24,9 +24,9 @@ import (
 
 var (
 	ErrTokenInvalid  = errors.New("invalid confirmation token")
-	ErrTokenExpired  = errors.New("confirmation token expired, call the Plan tool again")
-	ErrTokenConsumed = errors.New("confirmation token already used, call the Plan tool again")
-	ErrTokenMismatch = errors.New("confirmation token does not match this operation, call the Plan tool again with these exact parameters")
+	ErrTokenExpired  = errors.New("confirmation token expired, run planChange again with the same operation to obtain a fresh confirmationToken")
+	ErrTokenConsumed = errors.New("confirmation token already used, run planChange again with the same operation to obtain a fresh confirmationToken")
+	ErrTokenMismatch = errors.New("confirmation token does not match this operation, run planChange again with the same operation and these exact parameters to obtain a fresh confirmationToken")
 
 	// ErrConfirmationUnsupported means the connected client cannot answer a
 	// server-initiated user confirmation. The operation must NOT be executed.

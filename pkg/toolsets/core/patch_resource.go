@@ -72,7 +72,7 @@ type updateKubernetesResourceParams struct {
 	APIVersion        string        `json:"apiVersion,omitempty" jsonschema:"optional API group and version (e.g. harvesterhci.io/v1beta1) to disambiguate custom resources"`
 	Cluster           string        `json:"cluster" jsonschema:"the name of the Kubernetes cluster"`
 	Patch             jsonPatchList `json:"patch" jsonschema:"a JSON array of patch operation objects. Each element must be an object with 'op', 'path', and optionally 'value' fields, as defined in RFC 6902 (application/json-patch+json). Prefer a real JSON array; a stringified array is also accepted. Example: [{\"op\":\"replace\",\"path\":\"/spec/replicas\",\"value\":3}]"`
-	ConfirmationToken string        `json:"confirmationToken,omitempty" jsonschema:"REQUIRED (unless the server runs in auto-write mode): the single-use confirmationToken returned by patchKubernetesResourcePlan for THIS exact operation. Never invent, reuse, or guess a token"`
+	ConfirmationToken string        `json:"confirmationToken,omitempty" jsonschema:"REQUIRED (unless the server runs in auto-write mode): the single-use confirmationToken returned by planChange (operation patchKubernetesResource) for THIS exact operation. Never invent, reuse, or guess a token"`
 }
 
 // patchResourceInputSchema builds the input schema for the patch tools.

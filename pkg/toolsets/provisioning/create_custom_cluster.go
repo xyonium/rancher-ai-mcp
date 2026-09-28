@@ -29,7 +29,7 @@ type createCustomClusterParams struct {
 	Version      string `json:"version" jsonschema:"the rke2 or k3s version that will be used for the cluster"`
 	Distribution string `json:"distribution" jsonschema:"the distribution of the cluster, either rke2 or k3s"`
 
-	ConfirmationToken string `json:"confirmationToken,omitempty" jsonschema:"REQUIRED (unless the server runs in auto-write mode): the single-use confirmationToken returned by createCustomClusterPlan for THIS exact operation. Never invent, reuse, or guess a token"`
+	ConfirmationToken string `json:"confirmationToken,omitempty" jsonschema:"REQUIRED (unless the server runs in auto-write mode): the single-use confirmationToken returned by planChange (operation createCustomCluster) for THIS exact operation. Never invent, reuse, or guess a token"`
 }
 
 // createCustomCluster creates a custom cluster. The execution is gated behind a

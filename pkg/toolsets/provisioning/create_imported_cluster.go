@@ -21,7 +21,7 @@ type createImportedClusterParams struct {
 	Description              string `json:"description,omitempty" jsonschema:"a short description added to the cluster"`
 	VersionManagementSetting string `json:"VersionManagementSetting,omitempty" jsonschema:"specifies the version management setting for the cluster. Potential values are system-default, true, and false. If not specified, the global version management setting will be used"`
 
-	ConfirmationToken string `json:"confirmationToken,omitempty" jsonschema:"REQUIRED (unless the server runs in auto-write mode): the single-use confirmationToken returned by createImportedClusterPlan for THIS exact operation. Never invent, reuse, or guess a token"`
+	ConfirmationToken string `json:"confirmationToken,omitempty" jsonschema:"REQUIRED (unless the server runs in auto-write mode): the single-use confirmationToken returned by planChange (operation createImportedCluster) for THIS exact operation. Never invent, reuse, or guess a token"`
 }
 
 // createImportedCluster creates an imported cluster. The execution is gated

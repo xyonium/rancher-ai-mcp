@@ -34,7 +34,7 @@ type execPodParams struct {
 	Name              string   `json:"name" jsonschema:"the name of the pod"`
 	Container         string   `json:"container,omitempty" jsonschema:"the container to execute in. Defaults to the first container"`
 	Command           []string `json:"command" jsonschema:"the command to execute as an argv array (e.g. [\"ls\", \"-la\", \"/etc\"]). Never wrap it in a shell (sh -c) unless the user explicitly asked for shell behavior"`
-	ConfirmationToken string   `json:"confirmationToken,omitempty" jsonschema:"REQUIRED: the single-use confirmationToken returned by execPodPlan for THIS exact command. Never invent, reuse, or guess a token"`
+	ConfirmationToken string   `json:"confirmationToken,omitempty" jsonschema:"REQUIRED: the single-use confirmationToken returned by planChange (operation execPod) for THIS exact command. Never invent, reuse, or guess a token"`
 }
 
 // execPodInputSchema builds the input schema for the exec tools.

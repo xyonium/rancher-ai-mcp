@@ -25,7 +25,7 @@ type createProjectParams struct {
 	MemoryLimit       int    `json:"memoryLimit,omitempty" jsonschema:"the maximum amount of memory resources (MiB) that can be used by containers in the project"`
 	MemoryReservation int    `json:"memoryReservation,omitempty" jsonschema:"the amount of memory resources (MiB) reserved for containers in the project"`
 
-	ConfirmationToken string `json:"confirmationToken,omitempty" jsonschema:"REQUIRED (unless the server runs in auto-write mode): the single-use confirmationToken returned by createProjectPlan for THIS exact operation. Never invent, reuse, or guess a token"`
+	ConfirmationToken string `json:"confirmationToken,omitempty" jsonschema:"REQUIRED (unless the server runs in auto-write mode): the single-use confirmationToken returned by planChange (operation createProject) for THIS exact operation. Never invent, reuse, or guess a token"`
 }
 
 // createProject creates a project resource. The creation is gated behind a

@@ -20,7 +20,7 @@ type deleteKubernetesResourceParams struct {
 	Kind              string `json:"kind" jsonschema:"the type of Kubernetes resource to delete. Any kind is supported, including custom resources"`
 	APIVersion        string `json:"apiVersion,omitempty" jsonschema:"optional API group and version (e.g. harvesterhci.io/v1beta1) to disambiguate custom resources"`
 	Cluster           string `json:"cluster" jsonschema:"the name of the Kubernetes cluster"`
-	ConfirmationToken string `json:"confirmationToken,omitempty" jsonschema:"REQUIRED: the single-use confirmationToken returned by deleteKubernetesResourcePlan for THIS exact deletion. Never invent, reuse, or guess a token"`
+	ConfirmationToken string `json:"confirmationToken,omitempty" jsonschema:"REQUIRED: the single-use confirmationToken returned by planChange (operation deleteKubernetesResource) for THIS exact deletion. Never invent, reuse, or guess a token"`
 }
 
 // deleteKubernetesResourcePlan fetches the resource to be deleted and returns
