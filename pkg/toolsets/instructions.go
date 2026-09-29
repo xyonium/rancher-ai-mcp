@@ -14,6 +14,7 @@ var writeOperations = []string{
 	"patchKubernetesResource",
 	"deleteKubernetesResource",
 	"createProject",
+	"moveNamespace",
 	"createCustomCluster",
 	"createImportedCluster",
 	"createK3kCluster",
@@ -159,9 +160,10 @@ func autoWriteInstructions(cfg toolconfig.Config) string {
 
 2. The server is running in AUTO-WRITE mode: create/update-class operations
    (operation: createKubernetesResource, patchKubernetesResource,
-   createProject, createCustomCluster, createImportedCluster, createK3kCluster,
-   scaleClusterNodePool) execute immediately when you call them. Even so,
-   only call them when the user has asked for the operation.
+   createProject, moveNamespace, createCustomCluster, createImportedCluster,
+   createK3kCluster, scaleClusterNodePool)
+   execute immediately when you call them. Even so, only call them when the
+   user has asked for the operation.
 %s
 
 4. Approval NEVER carries over. Every operation that still requires

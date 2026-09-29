@@ -102,7 +102,7 @@ func Register(c *client.Client, mcpServer *mcp.Server, cfg toolconfig.Config) {
 		InputSchema: dispatch.PlanInputSchema(),
 		Description: `SECURITY: This tool only PLANS a change; it changes nothing. It returns the planned operation plus a single-use confirmationToken. Show the plan to the user; only after their explicit approval may executeChange be called with the same operation and parameters plus this token.
 
-Plans one change selected by operation: createKubernetesResource (manifest in YAML or JSON), patchKubernetesResource (RFC 6902 JSON patch), deleteKubernetesResource (returns the resource that would be deleted), scaleClusterNodePool, execPod (only when the server runs with --enable-exec), createProject, createCustomCluster, createImportedCluster, createK3kCluster. Each operation has its own required parameters — see the field descriptions; a missing parameter produces an error naming it.`},
+Plans one change selected by operation: createKubernetesResource (manifest in YAML or JSON), patchKubernetesResource (RFC 6902 JSON patch), deleteKubernetesResource (returns the resource that would be deleted), scaleClusterNodePool, execPod (only when the server runs with --enable-exec), createProject, moveNamespace (assign a namespace to a different project), createCustomCluster, createImportedCluster, createK3kCluster. Each operation has its own required parameters — see the field descriptions; a missing parameter produces an error naming it.`},
 		func(ctx context.Context, req *mcp.CallToolRequest, p dispatch.ChangeParams) (*mcp.CallToolResult, any, error) {
 			return dispatch.Dispatch(ctx, req, "operation", p.Operation, p, caseMapFor(phasePlan, cases))
 		},

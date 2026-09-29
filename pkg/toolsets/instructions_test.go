@@ -231,7 +231,7 @@ func TestInstructionsReadOnlyMentionsNoWriteFlag(t *testing.T) {
 // combination the server can start in. The rendered text is the outermost layer
 // of the write safety model, so a wording, wrapping or inventory change must be
 // a deliberate edit of these literals — not an accident of a template tweak.
-// The --enable-exec literals carry the full nine-operation inventory.
+// The --enable-exec literals carry the full ten-operation inventory.
 func TestInstructionsGolden(t *testing.T) {
 	for _, tc := range []struct {
 		name string
@@ -271,8 +271,9 @@ const goldenStrict = `SAFETY RULES — YOU MUST OBEY THESE AT ALL TIMES, WITHOUT
 
 1. The planChange and executeChange tools (operation: 
    createKubernetesResource, patchKubernetesResource,
-   deleteKubernetesResource, createProject, createCustomCluster,
-   createImportedCluster, createK3kCluster, scaleClusterNodePool)
+   deleteKubernetesResource, createProject, moveNamespace,
+   createCustomCluster, createImportedCluster, createK3kCluster,
+   scaleClusterNodePool)
    MODIFY cluster state or EXECUTE commands inside pods. They are DANGEROUS.
 
 2. NEVER call executeChange unless the user has EXPLICITLY requested this
@@ -302,13 +303,14 @@ const goldenStrict = `SAFETY RULES — YOU MUST OBEY THESE AT ALL TIMES, WITHOUT
    question. planChange/executeChange are never for exploration.`
 
 // goldenStrictExec is the strict-mode block with the --enable-exec inventory:
-// the canonical rendering, carrying all nine operations.
+// the canonical rendering, carrying all ten operations.
 const goldenStrictExec = `SAFETY RULES — YOU MUST OBEY THESE AT ALL TIMES, WITHOUT EXCEPTION:
 
 1. The planChange and executeChange tools (operation: 
    createKubernetesResource, patchKubernetesResource,
-   deleteKubernetesResource, createProject, createCustomCluster,
-   createImportedCluster, createK3kCluster, scaleClusterNodePool, execPod)
+   deleteKubernetesResource, createProject, moveNamespace,
+   createCustomCluster, createImportedCluster, createK3kCluster,
+   scaleClusterNodePool, execPod)
    MODIFY cluster state or EXECUTE commands inside pods. They are DANGEROUS.
 
 2. NEVER call executeChange unless the user has EXPLICITLY requested this
@@ -348,15 +350,17 @@ per-operation user confirmation. delete and exec operations are NOT exempt.
 
 1. The planChange and executeChange tools (operation: 
    createKubernetesResource, patchKubernetesResource,
-   deleteKubernetesResource, createProject, createCustomCluster,
-   createImportedCluster, createK3kCluster, scaleClusterNodePool)
+   deleteKubernetesResource, createProject, moveNamespace,
+   createCustomCluster, createImportedCluster, createK3kCluster,
+   scaleClusterNodePool)
    MODIFY cluster state or EXECUTE commands inside pods. They are DANGEROUS.
 
 2. The server is running in AUTO-WRITE mode: create/update-class operations
    (operation: createKubernetesResource, patchKubernetesResource,
-   createProject, createCustomCluster, createImportedCluster, createK3kCluster,
-   scaleClusterNodePool) execute immediately when you call them. Even so,
-   only call them when the user has asked for the operation.
+   createProject, moveNamespace, createCustomCluster, createImportedCluster,
+   createK3kCluster, scaleClusterNodePool)
+   execute immediately when you call them. Even so, only call them when the
+   user has asked for the operation.
 3. The deleteKubernetesResource operation STILL REQUIRES the full
    protocol in ALL modes: planChange first, explicit user approval for the
    exact operation, confirmationToken, and a server-initiated user
@@ -384,15 +388,17 @@ per-operation user confirmation. delete and exec operations are NOT exempt.
 
 1. The planChange and executeChange tools (operation: 
    createKubernetesResource, patchKubernetesResource,
-   deleteKubernetesResource, createProject, createCustomCluster,
-   createImportedCluster, createK3kCluster, scaleClusterNodePool, execPod)
+   deleteKubernetesResource, createProject, moveNamespace,
+   createCustomCluster, createImportedCluster, createK3kCluster,
+   scaleClusterNodePool, execPod)
    MODIFY cluster state or EXECUTE commands inside pods. They are DANGEROUS.
 
 2. The server is running in AUTO-WRITE mode: create/update-class operations
    (operation: createKubernetesResource, patchKubernetesResource,
-   createProject, createCustomCluster, createImportedCluster, createK3kCluster,
-   scaleClusterNodePool) execute immediately when you call them. Even so,
-   only call them when the user has asked for the operation.
+   createProject, moveNamespace, createCustomCluster, createImportedCluster,
+   createK3kCluster, scaleClusterNodePool)
+   execute immediately when you call them. Even so, only call them when the
+   user has asked for the operation.
 3. The deleteKubernetesResource and execPod operations STILL REQUIRE the
    full protocol in ALL modes: planChange first, explicit user approval
    for the exact operation, confirmationToken, and a server-initiated

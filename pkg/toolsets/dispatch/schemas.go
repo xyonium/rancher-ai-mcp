@@ -20,7 +20,7 @@ var (
 	ChangeOperations = []string{
 		"createKubernetesResource", "patchKubernetesResource", "deleteKubernetesResource",
 		"scaleClusterNodePool", "execPod",
-		"createProject", "createCustomCluster", "createImportedCluster", "createK3kCluster",
+		"createProject", "moveNamespace", "createCustomCluster", "createImportedCluster", "createK3kCluster",
 	}
 )
 

@@ -38,13 +38,21 @@ func TestQueryCasesKeys(t *testing.T) {
 }
 
 // newRBACQueryCaseTools builds Tools over a fake dynamic client holding two
-// users and three PRTBs in two project namespaces.
+// users, a project whose backing namespace is local-p-abc, and three PRTBs in
+// two project namespaces.
 func newRBACQueryCaseTools(t *testing.T) *Tools {
 	t.Helper()
 	user := &unstructured.Unstructured{Object: map[string]any{
 		"apiVersion": "management.cattle.io/v3", "kind": "User",
 		"metadata": map[string]any{"name": "u-abc123"},
 		"username": "admin", "displayName": "Default Admin",
+	}}
+	// #142: the project-scoped listing resolves the backing namespace from the
+	// project object instead of computing clusterID-projectID.
+	project := &unstructured.Unstructured{Object: map[string]any{
+		"apiVersion": "management.cattle.io/v3", "kind": "Project",
+		"metadata": map[string]any{"name": "p-abc", "namespace": "local"},
+		"status":   map[string]any{"backingNamespace": "local-p-abc"},
 	}}
 	prtbInProject := &unstructured.Unstructured{Object: map[string]any{
 		"apiVersion": "management.cattle.io/v3", "kind": "ProjectRoleTemplateBinding",
@@ -57,7 +65,7 @@ func newRBACQueryCaseTools(t *testing.T) *Tools {
 		"projectName": "local:p-xyz", "userName": "u-abc123", "roleTemplateName": "project-member",
 	}}
 
-	dyn := dynamicfake.NewSimpleDynamicClientWithCustomListKinds(rbacScheme(), rbacGVRs, user, prtbInProject, prtbOtherProject)
+	dyn := dynamicfake.NewSimpleDynamicClientWithCustomListKinds(rbacScheme(), rbacGVRs, user, project, prtbInProject, prtbOtherProject)
 	c := &client.Client{DynClientCreator: func(*rest.Config) (dynamic.Interface, error) { return dyn, nil }}
 	return NewTools(test.WrapClient(c, fakeToken), false)
 }

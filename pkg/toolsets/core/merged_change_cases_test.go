@@ -73,8 +73,9 @@ var changeCasePod = &corev1.Pod{
 func TestPlanExecuteCaseKeys(t *testing.T) {
 	tools := NewTools(nil, changeCfg(t, false))
 	// The core change table is core's own four cases plus the projects
-	// sub-toolset's createProject, unioned in for the merged tools.
-	want := []string{"createKubernetesResource", "patchKubernetesResource", "deleteKubernetesResource", "execPod", "createProject"}
+	// sub-toolset's createProject and moveNamespace, unioned in for the merged
+	// tools.
+	want := []string{"createKubernetesResource", "patchKubernetesResource", "deleteKubernetesResource", "execPod", "createProject", "moveNamespace"}
 	if len(tools.PlanCases()) != len(want) || len(tools.ExecuteCases()) != len(want) {
 		t.Fatalf("core owns %d plan and %d execute cases, want %d", len(tools.PlanCases()), len(tools.ExecuteCases()), len(want))
 	}
@@ -98,6 +99,7 @@ func TestChangeCaseRequiredFields(t *testing.T) {
 		"deleteKubernetesResource": {"cluster", "kind", "name"},
 		"execPod":                  {"cluster", "namespace", "name", "command"},
 		"createProject":            {"cluster", "name"},
+		"moveNamespace":            {"cluster", "namespace", "project"},
 	}
 	for _, phase := range []string{"plan", "execute"} {
 		cases := tools.PlanCases()

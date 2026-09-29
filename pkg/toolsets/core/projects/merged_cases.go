@@ -42,6 +42,14 @@ func changeParams(p dispatch.ChangeParams) createProjectParams {
 	}
 }
 
+// moveNsParams maps flat merged params to moveNamespaceParams.
+func moveNsParams(p dispatch.ChangeParams) moveNamespaceParams {
+	return moveNamespaceParams{
+		Cluster: p.Cluster, Namespace: p.Namespace, Project: p.Project,
+		ConfirmationToken: p.ConfirmationToken,
+	}
+}
+
 // PlanCases returns projects' slice of the planChange dispatch table.
 func (t *Tools) PlanCases() map[string]dispatch.Case[dispatch.ChangeParams] {
 	return map[string]dispatch.Case[dispatch.ChangeParams]{
@@ -49,6 +57,12 @@ func (t *Tools) PlanCases() map[string]dispatch.Case[dispatch.ChangeParams] {
 			Required: []string{"cluster", "name"},
 			Handler: func(ctx context.Context, req *mcp.CallToolRequest, p dispatch.ChangeParams) (*mcp.CallToolResult, any, error) {
 				return t.createProjectPlan(ctx, req, changeParams(p))
+			},
+		},
+		"moveNamespace": {
+			Required: []string{"cluster", "namespace", "project"},
+			Handler: func(ctx context.Context, req *mcp.CallToolRequest, p dispatch.ChangeParams) (*mcp.CallToolResult, any, error) {
+				return t.moveNamespacePlan(ctx, req, moveNsParams(p))
 			},
 		},
 	}
@@ -61,6 +75,12 @@ func (t *Tools) ExecuteCases() map[string]dispatch.Case[dispatch.ChangeParams] {
 			Required: []string{"cluster", "name"},
 			Handler: func(ctx context.Context, req *mcp.CallToolRequest, p dispatch.ChangeParams) (*mcp.CallToolResult, any, error) {
 				return t.createProject(ctx, req, changeParams(p))
+			},
+		},
+		"moveNamespace": {
+			Required: []string{"cluster", "namespace", "project"},
+			Handler: func(ctx context.Context, req *mcp.CallToolRequest, p dispatch.ChangeParams) (*mcp.CallToolResult, any, error) {
+				return t.moveNamespace(ctx, req, moveNsParams(p))
 			},
 		},
 	}

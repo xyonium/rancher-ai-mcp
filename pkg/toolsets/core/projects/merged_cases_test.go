@@ -36,14 +36,17 @@ func TestMergedCaseKeys(t *testing.T) {
 	if got := maps.Keys(tools.QueryCases()); !equalKeys(got, "project", "projects", "resourceUsage") {
 		t.Errorf("query cases = %v", got)
 	}
-	if got := maps.Keys(tools.PlanCases()); !equalKeys(got, "createProject") {
+	if got := maps.Keys(tools.PlanCases()); !equalKeys(got, "createProject", "moveNamespace") {
 		t.Errorf("plan cases = %v", got)
 	}
-	if got := maps.Keys(tools.ExecuteCases()); !equalKeys(got, "createProject") {
+	if got := maps.Keys(tools.ExecuteCases()); !equalKeys(got, "createProject", "moveNamespace") {
 		t.Errorf("execute cases = %v", got)
 	}
 	if !slices.Equal(tools.PlanCases()["createProject"].Required, []string{"cluster", "name"}) {
 		t.Errorf("createProject required = %v", tools.PlanCases()["createProject"].Required)
+	}
+	if !slices.Equal(tools.PlanCases()["moveNamespace"].Required, []string{"cluster", "namespace", "project"}) {
+		t.Errorf("moveNamespace required = %v", tools.PlanCases()["moveNamespace"].Required)
 	}
 }
 
@@ -191,6 +194,55 @@ func TestCreateProjectCaseAutoWrite(t *testing.T) {
 	require.NoError(t, err)
 	require.Len(t, res.Content, 1)
 	assert.Equal(t, 1, countProjectCreates(dyn))
+}
+
+// TestMoveNamespaceCaseClosuresMapFlatParams is the moveNamespace twin of the
+// createProject token pin: the plan case resolves the destination display name
+// to the project ID and shows the moved namespace without persisting anything;
+// the execute case must take the flat merged params (cluster, namespace,
+// project, token) through to the gated handler, and a token minted for a
+// different namespace must be rejected before anything reaches the cluster.
+func TestMoveNamespaceCaseClosuresMapFlatParams(t *testing.T) {
+	dyn := dynamicfake.NewSimpleDynamicClientWithCustomListKinds(mergedCaseRuntimeScheme(), mergedCaseScheme(),
+		fakeMgmtCluster("test-cluster"),
+		fakeMgmtProject("test-cluster", "my-project", "My Project"),
+		fakeProjectNamespace("ns-1", "p-previous"),
+	)
+	gate := fakeGates(t, approveElicit)
+	tools := newProjectTestTools(t, toolconfig.Config{Gate: gate}, dyn)
+	ctx := middleware.WithToken(context.Background(), "fakeToken")
+
+	plan, _, err := tools.PlanCases()["moveNamespace"].Handler(ctx, &mcp.CallToolRequest{}, dispatch.ChangeParams{
+		Operation: "moveNamespace", Cluster: "test-cluster", Namespace: "ns-1", Project: "My Project",
+	})
+	require.NoError(t, err)
+	planText := plan.Content[0].(*mcp.TextContent).Text
+	assert.Contains(t, planText, "confirmationToken")
+	assert.Contains(t, planText, "my-project", "the plan must show the resolved project ID")
+	assert.Zero(t, countNamespaceUpdates(dyn), "a plan must not persist anything")
+
+	// Mint the token the plan handler would have issued, proving the case
+	// closure forwards it (and the rest of the flat params) into moveNamespace.
+	token := issueMoveNamespaceToken(t, gate, "test-cluster", "ns-1", "my-project")
+	_, _, err = tools.ExecuteCases()["moveNamespace"].Handler(ctx, &mcp.CallToolRequest{}, dispatch.ChangeParams{
+		Operation: "moveNamespace", Cluster: "test-cluster", Namespace: "ns-1", Project: "My Project",
+		ConfirmationToken: token,
+	})
+	require.NoError(t, err)
+	require.Equal(t, 1, countNamespaceUpdates(dyn))
+	updated := dyn.Actions()[len(dyn.Actions())-1].(clienttesting.UpdateAction).GetObject().(*unstructured.Unstructured)
+	assert.Equal(t, "my-project", updated.GetLabels()["field.cattle.io/projectId"])
+	assert.Equal(t, "test-cluster:my-project", updated.GetAnnotations()["field.cattle.io/projectId"])
+
+	// A token minted for another namespace must not be replayable here.
+	foreign := issueMoveNamespaceToken(t, gate, "test-cluster", "ns-2", "my-project")
+	_, _, err = tools.ExecuteCases()["moveNamespace"].Handler(ctx, &mcp.CallToolRequest{}, dispatch.ChangeParams{
+		Operation: "moveNamespace", Cluster: "test-cluster", Namespace: "ns-1", Project: "My Project",
+		ConfirmationToken: foreign,
+	})
+	require.Error(t, err)
+	assert.ErrorIs(t, err, confirm.ErrTokenMismatch)
+	assert.Equal(t, 1, countNamespaceUpdates(dyn), "a foreign token must not reach the cluster")
 }
 
 // mustNestedString returns a nested string field of an unstructured object,

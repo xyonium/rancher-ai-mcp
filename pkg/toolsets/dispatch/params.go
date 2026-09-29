@@ -54,9 +54,9 @@ type K3kLimits struct {
 // tools. Only Operation is schema-required (plus ConfirmationToken for
 // executeChange); per-operation requirements are enforced by Validate.
 type ChangeParams struct {
-	Operation         string `json:"operation" jsonschema:"required. Which change: createKubernetesResource|patchKubernetesResource|deleteKubernetesResource|scaleClusterNodePool|execPod|createProject|createCustomCluster|createImportedCluster|createK3kCluster"`
+	Operation         string `json:"operation" jsonschema:"required. Which change: createKubernetesResource|patchKubernetesResource|deleteKubernetesResource|scaleClusterNodePool|execPod|createProject|moveNamespace|createCustomCluster|createImportedCluster|createK3kCluster"`
 	Cluster           string `json:"cluster,omitempty" jsonschema:"cluster name or ID. Required by all operations except createCustomCluster, createImportedCluster"`
-	Namespace         string `json:"namespace,omitempty" jsonschema:"namespace (empty for cluster-wide resources). Required by: scaleClusterNodePool, execPod; optional for: createKubernetesResource, patchKubernetesResource, deleteKubernetesResource, createK3kCluster (k3k namespace)"`
+	Namespace         string `json:"namespace,omitempty" jsonschema:"namespace (empty for cluster-wide resources). Required by: scaleClusterNodePool, execPod, moveNamespace; optional for: createKubernetesResource, patchKubernetesResource, deleteKubernetesResource, createK3kCluster (k3k namespace)"`
 	Name              string `json:"name,omitempty" jsonschema:"object name. Required by every operation except none; for execPod it is the pod name"`
 	Description       string `json:"description,omitempty" jsonschema:"optional human description. Used by: createProject, createCustomCluster, createImportedCluster"`
 	ConfirmationToken string `json:"confirmationToken,omitempty" jsonschema:"REQUIRED by executeChange (unless the server runs in auto-write mode): the single-use confirmationToken returned by planChange for THIS exact operation and parameters. Never invent, reuse, or guess a token"`
@@ -84,6 +84,8 @@ type ChangeParams struct {
 	CPUReservation    int    `json:"cpuReservation,omitempty" jsonschema:"reserved CPU (mCPUs). Optional for: createProject"`
 	MemoryLimit       int    `json:"memoryLimit,omitempty" jsonschema:"max memory (MiB). Optional for: createProject"`
 	MemoryReservation int    `json:"memoryReservation,omitempty" jsonschema:"reserved memory (MiB). Optional for: createProject"`
+	// moveNamespace
+	Project string `json:"project,omitempty" jsonschema:"destination project name or ID. Required by: moveNamespace"`
 	// scaleClusterNodePool
 	NodePoolName     string `json:"nodePoolName,omitempty" jsonschema:"the node pool to scale. Required by: scaleClusterNodePool"`
 	DesiredSize      int    `json:"desiredSize,omitempty" jsonschema:"target pool size; ignored when amountToAdd/amountToSubtract is set. Optional for: scaleClusterNodePool"`
