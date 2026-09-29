@@ -210,6 +210,18 @@
     "mapsTo": { "tool": "executeChange", "params": { "operation": "createProject", "cluster": "${discovered.cluster}", "name": "baseline-probe-never-create", "confirmationToken": "invalid-baseline-token" } }
   },
   {
+    "id": "moveNamespacePlan",
+    "tool": "moveNamespacePlan",
+    "params": { "cluster": "${discovered.cluster}", "namespace": "${discovered.deploymentNamespace}", "project": "${discovered.projectID}" },
+    "mapsTo": { "tool": "planChange", "params": { "operation": "moveNamespace", "cluster": "${discovered.cluster}", "namespace": "${discovered.deploymentNamespace}", "project": "${discovered.projectID}" } }
+  },
+  {
+    "id": "moveNamespace",
+    "tool": "moveNamespace",
+    "params": { "cluster": "${discovered.cluster}", "namespace": "${discovered.deploymentNamespace}", "project": "${discovered.projectID}", "confirmationToken": "invalid-baseline-token" },
+    "mapsTo": { "tool": "executeChange", "params": { "operation": "moveNamespace", "cluster": "${discovered.cluster}", "namespace": "${discovered.deploymentNamespace}", "project": "${discovered.projectID}", "confirmationToken": "invalid-baseline-token" } }
+  },
+  {
     "id": "createKubernetesResource",
     "tool": "createKubernetesResource",
     "params": { "cluster": "${discovered.cluster}", "namespace": "${discovered.podNamespace}", "name": "baseline-probe-never-create", "kind": "ConfigMap", "manifest": "apiVersion: v1\nkind: ConfigMap\nmetadata:\n  name: baseline-probe-never-create\ndata:\n  key: value\n", "confirmationToken": "invalid-baseline-token" },

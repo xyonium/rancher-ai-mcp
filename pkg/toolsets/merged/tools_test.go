@@ -459,7 +459,7 @@ var baselineMapsToTool = map[string]bool{
 	"getKubernetesResource": true, "listKubernetesResources": true, "listAPIResources": true,
 }
 
-// TestBaselineMappingsDispatch pins that all 43 committed baseline mappings
+// TestBaselineMappingsDispatch pins that all 45 committed baseline mappings
 // reach the merged surface: every mapsTo.tool is a registered tool, and every
 // enum-dispatched mapping passes dispatch.Validate against the REAL case table
 // for its phase. Regressions this catches before the post-deploy run:
@@ -474,7 +474,7 @@ func TestBaselineMappingsDispatch(t *testing.T) {
 	require.NoError(t, err, "the committed case matrix must be readable")
 	var cases []baselineCase
 	require.NoError(t, json.Unmarshal(raw, &cases))
-	require.Len(t, cases, 43, "the case matrix is the 43-case v1 corpus")
+	require.Len(t, cases, 45, "the case matrix is the 43-case v1 corpus plus the v2-only moveNamespace pair")
 
 	m := buildCaseMaps(&client.Client{}, toolconfig.Config{})
 	phases := map[string]map[string]dispatch.Case[dispatch.ChangeParams]{
@@ -525,7 +525,7 @@ func TestBaselineMappingsDispatch(t *testing.T) {
 		require.NoError(t, err, "case %s: mapping does not dispatch", c.ID)
 		checked++
 	}
-	require.Equal(t, 43, checked, "every case must be validated")
+	require.Equal(t, 45, checked, "every case must be validated")
 }
 
 // decodeMappedParams reproduces what the wire decode does to a calls.json
