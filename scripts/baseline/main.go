@@ -1028,8 +1028,8 @@ func capture(v2 bool) error {
 	if err := json.Unmarshal(raw, &cases); err != nil {
 		return fmt.Errorf("parsing %s: %w", callsFile, err)
 	}
-	if len(cases) != 43 {
-		return fmt.Errorf("%s: expected 43 cases, got %d", callsFile, len(cases))
+	if len(cases) != 45 {
+		return fmt.Errorf("%s: expected 45 cases, got %d", callsFile, len(cases))
 	}
 
 	planned, err := planCalls(cases, v2)
@@ -1131,6 +1131,16 @@ var knownDiffs = map[string]string{
 	// environment the server runs in, not on the refactor.
 	"listSupportedKubernetesVersions": "v1 golden is an environment-dependent TLS error from the KDM endpoint",
 	"createCustomClusterPlan":         "v1 golden is an environment-dependent TLS error from the KDM endpoint",
+	// The v1 golden records the pre-#142 bug: the backing namespace was
+	// computed as clusterID-projectID (c-m-lv58vk4v-p-tvjpj), which holds no
+	// bindings, so the response is "no resources found". #142 reads
+	// status.backingNamespace from the project object (p-tvjpj) and returns
+	// the real bindings.
+	"listProjectRoleTemplateBindings": "v1 golden records the pre-#142 computed-backing-namespace bug; v2 reads status.backingNamespace and returns real bindings",
+	// getResourceUsage lists a project's namespaces in an order that varies
+	// between captures; the per-namespace values are identical. The v1/v2
+	// comparison is byte-based, so the reorder reads as a diff.
+	"getResourceUsage": "namespace listing order varies between captures; per-namespace values are identical",
 }
 
 // compareResult summarizes one compare run.
