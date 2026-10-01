@@ -36,8 +36,17 @@ jobs:
             echo IMAGE_TAG=${{ github.sha }} >> $GITHUB_ENV
           fi
 
-      # Default tags: safety-gated (auto-write OFF). This is the long pole —
-      # it compiles the Go binary and exports the full layer cache.
+      # Four variants of the same commit, one per MCP_ALLOW_AUTO_WRITE ×
+      # MCP_ENABLE_EXEC combination. Pick the tag by safety posture:
+      #   <ver>            AW=false EX=false   every change needs plan-token + user confirmation; no exec
+      #   <ver>-exec       AW=false EX=true    same, plus the confirmation-gated execPod operation
+      #   <ver>-auto       AW=true  EX=false   create/update-class ops skip confirmation; delete gated; no exec
+      #   <ver>-exec-auto  AW=true  EX=true    create/update auto-write, execPod enabled; delete+exec still gated
+      # The binary is identical in all four; only the trailing metadata-only
+      # ENV layer differs.
+
+      # Default tags: safety-gated (auto-write OFF, exec OFF). This is the long
+      # pole — it compiles the Go binary and exports the full layer cache.
       - name: Build image (latest — safety-gated default)
         uses: docker/build-push-action@v5
         with:
@@ -49,7 +58,7 @@ jobs:
             VERSION=${{ github.ref_name }}
             COMMIT=${{ github.sha }}
             MCP_ALLOW_AUTO_WRITE=false
-            MCP_ENABLE_EXEC=${{ vars.MCP_ENABLE_EXEC || 'false' }}
+            MCP_ENABLE_EXEC=false
           tags: |
             ghcr.io/${{ env.IMAGE_REPOSITORY }}:latest
             ghcr.io/${{ env.IMAGE_REPOSITORY }}:${{ env.IMAGE_TAG }}
@@ -59,10 +68,31 @@ jobs:
           cache-from: type=gha
           cache-to: type=gha,mode=max
 
-      # Auto-write variant: identical binary; only the trailing metadata-only
-      # ENV layer differs. The Go compile and every content layer are cache
-      # hits from the previous step (same job, same gha cache scope), so this
-      # build completes in seconds and shares all blobs in the registry.
+      # Later variants: identical binary; only the trailing metadata-only ENV
+      # layer differs. The Go compile and every content layer are cache hits
+      # from the first step (same job, same gha cache scope), so these builds
+      # complete in seconds and share all blobs in the registry.
+      - name: Build image (exec — execPod enabled, still confirmation-gated)
+        uses: docker/build-push-action@v5
+        with:
+          context: .
+          file: package/Dockerfile
+          platforms: linux/amd64,linux/arm64
+          push: true
+          build-args: |
+            VERSION=${{ github.ref_name }}
+            COMMIT=${{ github.sha }}
+            MCP_ALLOW_AUTO_WRITE=false
+            MCP_ENABLE_EXEC=true
+          tags: |
+            ghcr.io/${{ env.IMAGE_REPOSITORY }}:exec
+            ghcr.io/${{ env.IMAGE_REPOSITORY }}:${{ env.IMAGE_TAG }}-exec
+          labels: |
+            org.opencontainers.image.source=https://github.com/${{ github.repository }}
+            org.opencontainers.image.description=Fork of rancher-ai-mcp, exec variant: enables the execPod operation of planChange/executeChange, still gated by plan-token + user confirmation
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+
       - name: Build image (auto — create/update auto-write enabled)
         uses: docker/build-push-action@v5
         with:
@@ -74,12 +104,33 @@ jobs:
             VERSION=${{ github.ref_name }}
             COMMIT=${{ github.sha }}
             MCP_ALLOW_AUTO_WRITE=true
-            MCP_ENABLE_EXEC=${{ vars.MCP_ENABLE_EXEC || 'false' }}
+            MCP_ENABLE_EXEC=false
           tags: |
             ghcr.io/${{ env.IMAGE_REPOSITORY }}:auto
             ghcr.io/${{ env.IMAGE_REPOSITORY }}:${{ env.IMAGE_TAG }}-auto
           labels: |
             org.opencontainers.image.source=https://github.com/${{ github.repository }}
-            org.opencontainers.image.description=Fork of rancher-ai-mcp, auto-write variant: create/update-class tools skip per-operation user confirmation; delete/exec are still always gated
+            org.opencontainers.image.description=Fork of rancher-ai-mcp, auto-write variant: create/update-class tools skip per-operation user confirmation; delete is still always gated and exec is unavailable
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+
+      - name: Build image (exec-auto — auto-write plus execPod)
+        uses: docker/build-push-action@v5
+        with:
+          context: .
+          file: package/Dockerfile
+          platforms: linux/amd64,linux/arm64
+          push: true
+          build-args: |
+            VERSION=${{ github.ref_name }}
+            COMMIT=${{ github.sha }}
+            MCP_ALLOW_AUTO_WRITE=true
+            MCP_ENABLE_EXEC=true
+          tags: |
+            ghcr.io/${{ env.IMAGE_REPOSITORY }}:exec-auto
+            ghcr.io/${{ env.IMAGE_REPOSITORY }}:${{ env.IMAGE_TAG }}-exec-auto
+          labels: |
+            org.opencontainers.image.source=https://github.com/${{ github.repository }}
+            org.opencontainers.image.description=Fork of rancher-ai-mcp, exec+auto variant: create/update-class tools skip confirmation and execPod is enabled; delete and exec are still always gated
           cache-from: type=gha
           cache-to: type=gha,mode=max

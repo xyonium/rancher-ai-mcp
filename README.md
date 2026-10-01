@@ -106,21 +106,20 @@ The stock chart hardcodes the MCP container args and has no extraArgs passthroug
 so the supported delivery paths are:
 
 1. **Image-level ENV (recommended, no chart changes).** The GitHub Action builds
-   two variants of the same commit — pick the tag by safety posture:
+   four variants of the same commit — one per `MCP_ALLOW_AUTO_WRITE` × `MCP_ENABLE_EXEC`
+   combination; pick the tag by safety posture:
 
-   | Tag | `MCP_ALLOW_AUTO_WRITE` | Behavior |
-   |-----|----------------------|----------|
-   | `latest`, `<sha>`, `vX.Y.Z` | `false` | every change requires plan-token + user confirmation |
-   | `auto`, `<sha>-auto`, `vX.Y.Z-auto` | `true` | create/update-class operations execute without confirmation; delete/exec still always gated |
+   | Tag | `MCP_ALLOW_AUTO_WRITE` | `MCP_ENABLE_EXEC` | Behavior |
+   |-----|----------------------|-------------------|----------|
+   | `latest`, `<sha>`, `vX.Y.Z` | `false` | `false` | every change requires plan-token + user confirmation; no exec |
+   | `exec`, `<sha>-exec`, `vX.Y.Z-exec` | `false` | `true` | same, plus the confirmation-gated `execPod` operation |
+   | `auto`, `<sha>-auto`, `vX.Y.Z-auto` | `true` | `false` | create/update-class operations execute without confirmation; delete still always gated; no exec |
+   | `exec-auto`, `<sha>-exec-auto`, `vX.Y.Z-exec-auto` | `true` | `true` | auto-write plus `execPod` enabled; delete and exec still always gated |
 
-   The repository Actions variable `MCP_ENABLE_EXEC` (default unset = `false`) is baked into BOTH
-   image tags, including `latest`: setting it to `true` enables the `execPod` operation of
-   `planChange`/`executeChange` in the safe tag too. Exec stays fully confirmation-gated in every
-   mode either way.
-
-   `latest` and `auto` are floating tags, and the chart's default `imagePullPolicy: IfNotPresent`
-   means a node-local cached image is not refreshed on upgrade. For reproducible upgrades, pin an
-   immutable tag instead: `<sha>` / `<sha>-auto` (or `vX.Y.Z` / `vX.Y.Z-auto`).
+   `latest`, `exec`, `auto` and `exec-auto` are floating tags, and the chart's default
+   `imagePullPolicy: IfNotPresent` means a node-local cached image is not refreshed on
+   upgrade. For reproducible upgrades, pin an immutable tag instead: `<sha>` /
+   `<sha>-exec` / `<sha>-auto` / `<sha>-exec-auto` (or the `vX.Y.Z…` equivalents).
 
    Then point the chart at the image:
 
@@ -135,7 +134,7 @@ so the supported delivery paths are:
    mcp:
      image:
        repository: ghcr.io/<your-github-user>/rancher-ai-mcp    # fully qualified fork image
-       tag: latest                      # safety-gated; use "auto" (or "<sha>-auto") for the auto-write variant
+       tag: latest                      # safety-gated; see the table above for the exec/auto variants
    # imagePullSecrets:                    # only if the GHCR package is private
    #   - name: ghcr-pull-secret
    ```
