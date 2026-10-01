@@ -1,11 +1,36 @@
-## MCP Server for Rancher
+# MCP Server for Rancher
+
+> **39 tools → 7. Every write gated by the human, not the agent.**
+
+An MCP server that lets the [Rancher AI agent](https://github.com/rancher-sandbox/rancher-ai-agent) safely inspect **and change** Kubernetes and Rancher resources across the local and every downstream cluster.
+
+This fork takes the upstream server in two opinionated directions:
+
+- **A drastically smaller surface.** Upstream exposes **39** narrowly-scoped tools; this fork consolidates them into **7** enum-dispatched tools that drive the *same* handlers. Fewer schemas in every prompt, a smaller attack surface, and far less for the model to get wrong — with **zero loss of capability** (any CRD included) and one new addition: a confirmation-gated **`execPod`** operation.
+- **Writes the human actually controls.** No write ever runs because the model decided to. Every mutation goes `planChange` → explicit user approval → `executeChange`, where the server issues a single-use HMAC token bound to the *exact* parameters and then asks the **user directly** (via MCP elicitation) — the agent never sees or answers that prompt. If the client can't elicit, the change **fails closed**. `delete` and `execPod` are **never** exempt, even in auto-write mode.
+
+<p align="center">
+  <img src="docs/diagrams/tool-surface.svg" alt="Consolidated 7-tool surface and the plan → approve → execute confirmation flow" width="880"/>
+</p>
+
+It expects the Rancher token in a header, which the agent always provides for authentication.
+
 [![OpenSSF Scorecard](https://api.scorecard.dev/projects/github.com/rancher/rancher-ai-mcp/badge)](https://scorecard.dev/viewer/?uri=github.com/rancher/rancher-ai-mcp)
 
-The MCP server allows the [Rancher AI agent](https://github.com/rancher-sandbox/rancher-ai-agent) to securely retrieve or update Kubernetes and Rancher resources across local and downstream clusters. It expects the Rancher token in a header, which the agent will always provide for authentication.
+## Why this fork
+
+| | Upstream | This fork |
+|---|----------|-----------|
+| **Tool count** | 39 | **7** (same capabilities, enum-dispatched) |
+| **Prompt footprint** | 39 schemas | 7 schemas |
+| **`execPod`** | — | ✅ opt-in, always confirmation-gated |
+| **Write safety** | client-side hints | **server-enforced** plan-token + direct user elicitation |
+| **Arbitrary CRDs** | built-in table only | ✅ full `listAPIResources` discovery + GVR resolution |
+| **Deployment posture** | one image | **4 tags** — pick auto-write × exec per environment |
 
 ## Overview
 
-This Model Context Protocol (MCP) server provides a secure bridge between the Rancher AI agent and Kubernetes clusters, enabling AI-powered cluster management through a standardized tool interface. The server runs as a Kubernetes deployment within the Rancher environment and exposes tools for resource inspection, modification, and cluster operations.
+This Model Context Protocol (MCP) server provides a secure bridge between the Rancher AI agent and Kubernetes clusters, enabling AI-powered cluster management through a standardized tool interface. The server runs as a Kubernetes deployment within the Rancher environment and exposes a small, consolidated set of tools for resource inspection, modification, and cluster operations.
 
 ## Architecture
 
@@ -21,9 +46,11 @@ This Model Context Protocol (MCP) server provides a secure bridge between the Ra
   - Support for both local and downstream cluster operations
 
 - **`pkg/toolsets/`** - Tool registration and organization
-  - `toolsets.go` - Central registry for tool collections
-  - `merged/` - The only registration surface: the 7 tools exposed by the server
-  - `core/`, `fleet/`, `provisioning/` - Per-domain operation handlers dispatched by the merged tools
+  - `merged/` - The only registration surface: the 7 tools exposed by the server (3 k8s-generic + 4 enum-dispatched)
+  - `dispatch/` - Flat-parameter validation, case dispatch, and the merged input schemas
+  - `core/`, `fleet/`, `provisioning/` (+ `core/projects`, `core/rbac`) - Per-domain handlers and their query/diagnose/plan/execute case tables; they register no MCP tools themselves
+  - `toolsets.go` - `AddAllTools`, which delegates entirely to `merged.Register`
+  - `instructions.go` - Builds the server-level safety instructions for the exact configuration in effect
 
 - **`pkg/response/`** - Response formatting utilities
   - Structured text and content generation for MCP responses
@@ -31,15 +58,18 @@ This Model Context Protocol (MCP) server provides a secure bridge between the Ra
 - **`pkg/converter/`** - Data transformation utilities
   - Group/Version/Resource (GVR) conversion helpers
 
-### Multi-Agent Architecture
+### Consolidated Tool Surface
 
-The server is designed with a modular toolset architecture to support a **multi-agent system**. Each toolset contains a collection of related tools that serve a specific agent or domain within the Rancher AI ecosystem.
+Upstream registers one MCP tool per Rancher operation (39 in total). This fork instead exposes **7 tools** through two toolsets, and routes each to the same underlying handlers by an enum parameter — so capability is preserved while the tool surface, prompt footprint, and per-tool schema validation shrink dramatically.
 
-**Current Toolsets:**
-- **`merged`** - The consolidated surface: `rancherQuery`, `diagnose`, `planChange` and `executeChange`. Each one dispatches an enum parameter to the per-domain handlers.
-- **`rancher`** - The K8s-generic tools: `getKubernetesResource`, `listKubernetesResources`, `listAPIResources`.
+**Exposed toolsets (the entire MCP surface):**
 
-This architecture allows different AI agents to access only the tools they need, improving security, maintainability, and scalability. 
+- **`merged`** — the dispatch surface, 4 tools. Each takes an enum that selects the operation and dispatches to the per-domain handler:
+  - `rancherQuery` (read-only Rancher API), `diagnose` (troubleshooting bundles),
+  - `planChange` / `executeChange` (the only write path — see the safety model below).
+- **`rancher`** — the generic Kubernetes reads, 3 tools: `getKubernetesResource`, `listKubernetesResources`, `listAPIResources`. Kind resolution goes through live API discovery, so **any CRD** works, not just a hardcoded table.
+
+The per-domain logic still lives in `core/`, `fleet/`, `provisioning/`, `projects/`, and `rbac/` — but those packages now only hold handlers and case tables; nothing registers a separate MCP tool. Adding a capability means adding a case, not a new top-level tool.
 
 ### TLS & Security
 
@@ -73,9 +103,18 @@ make generate
 ```bash
 --port <int>              Port to listen on (default: 9092)
 --insecure                Skip TLS verification (default: false)
+--read-only               Register only read-only tools
+--allow-auto-write        Let create/update-class ops skip per-op confirmation (env MCP_ALLOW_AUTO_WRITE)
+--enable-exec             Enable the confirmation-gated execPod operation (env MCP_ENABLE_EXEC)
 ```
 
+The full flag/env/default table is in the [safety model](#flags-and-environment-variables) below.
+
 ## Safety Model: Mandatory User Confirmation for Write Operations
+
+<p align="center">
+  <img src="docs/diagrams/consolidation-variants.svg" alt="39 upstream tools consolidated to 7, and the four image variants by auto-write × exec" width="880"/>
+</p>
 
 Every tool that modifies cluster state or executes commands is gated by the
 server, not the client:

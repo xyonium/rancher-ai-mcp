@@ -1,0 +1,83 @@
+<mxfile host="app.diagrams.net" agent="claude" version="24.0.0">
+  <diagram name="Tool Surface &amp; Confirmation Flow" id="tool-surface">
+    <mxGraphModel dx="1200" dy="800" grid="1" gridSize="10" guides="1" tooltips="1" connect="1" arrows="1" fold="1" page="1" pageScale="1" pageWidth="1100" pageHeight="850" math="0" shadow="0">
+      <root>
+        <mxCell id="0"/>
+        <mxCell id="1" parent="0"/>
+        <mxCell id="title" value="rancher-ai-mcp — Consolidated Tool Surface &amp;amp; Confirmation Flow" style="text;html=1;fontSize=20;fontStyle=1;align=center;verticalAlign=middle;" vertex="1" parent="1">
+          <mxGeometry x="150" y="20" width="800" height="32" as="geometry"/>
+        </mxCell>
+        <mxCell id="surface" value="" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#f5f5f5;strokeColor=#666666;verticalAlign=top;fontSize=12;fontStyle=1;align=center;" vertex="1" parent="1">
+          <mxGeometry x="40" y="80" width="430" height="600" as="geometry"/>
+        </mxCell>
+        <mxCell id="surfaceLbl" value="ONE MCP server · 7 tools (was 39 upstream)" style="text;html=1;fontSize=13;fontStyle=1;align=center;" vertex="1" parent="1">
+          <mxGeometry x="50" y="86" width="410" height="22" as="geometry"/>
+        </mxCell>
+        <mxCell id="merged" value="" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#dae8fc;strokeColor=#6c8ebf;verticalAlign=top;fontStyle=1;align=center;" vertex="1" parent="1">
+          <mxGeometry x="70" y="120" width="370" height="330" as="geometry"/>
+        </mxCell>
+        <mxCell id="mergedLbl" value="merged — the dispatch surface" style="text;html=1;fontSize=12;fontStyle=1;align=center;fontColor=#1a3a6b;" vertex="1" parent="1">
+          <mxGeometry x="80" y="126" width="350" height="20" as="geometry"/>
+        </mxCell>
+        <mxCell id="q" value="rancherQuery&#10;&#10;read-only Rancher API&#10;(projects · fleet · RBAC · usage)" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#ffffff;strokeColor=#6c8ebf;fontSize=11;align=center;" vertex="1" parent="1">
+          <mxGeometry x="95" y="156" width="320" height="60" as="geometry"/>
+        </mxCell>
+        <mxCell id="d" value="diagnose&#10;&#10;troubleshooting bundles&#10;(cluster · machines · nodes · pod · deploy)" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#ffffff;strokeColor=#6c8ebf;fontSize=11;align=center;" vertex="1" parent="1">
+          <mxGeometry x="95" y="228" width="320" height="60" as="geometry"/>
+        </mxCell>
+        <mxCell id="p" value="planChange  ✦ WRITE&#10;&#10;validates &amp;amp; issues a single-use token&#10;(changes nothing)" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#fff2cc;strokeColor=#d6b656;fontSize=11;align=center;fontStyle=1;" vertex="1" parent="1">
+          <mxGeometry x="95" y="300" width="320" height="60" as="geometry"/>
+        </mxCell>
+        <mxCell id="e" value="executeChange  ✦ WRITE&#10;&#10;runs the change — gated by token +&#10;direct user confirmation" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#f8cecc;strokeColor=#b85450;fontSize=11;align=center;fontStyle=1;" vertex="1" parent="1">
+          <mxGeometry x="95" y="372" width="320" height="60" as="geometry"/>
+        </mxCell>
+        <mxCell id="rancher" value="" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#d5e8d4;strokeColor=#82b366;verticalAlign=top;fontStyle=1;align=center;" vertex="1" parent="1">
+          <mxGeometry x="70" y="470" width="370" height="190" as="geometry"/>
+        </mxCell>
+        <mxCell id="rancherLbl" value="rancher — generic Kubernetes reads (any CRD)" style="text;html=1;fontSize=12;fontStyle=1;align=center;fontColor=#2d5a1e;" vertex="1" parent="1">
+          <mxGeometry x="80" y="476" width="350" height="20" as="geometry"/>
+        </mxCell>
+        <mxCell id="k1" value="getKubernetesResource" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#ffffff;strokeColor=#82b366;fontSize=11;align=center;" vertex="1" parent="1">
+          <mxGeometry x="95" y="506" width="320" height="36" as="geometry"/>
+        </mxCell>
+        <mxCell id="k2" value="listKubernetesResources  (paginated + JSONPath)" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#ffffff;strokeColor=#82b366;fontSize=11;align=center;" vertex="1" parent="1">
+          <mxGeometry x="95" y="552" width="320" height="36" as="geometry"/>
+        </mxCell>
+        <mxCell id="k3" value="listAPIResources  (discover kinds &amp;amp; CRDs)" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#ffffff;strokeColor=#82b366;fontSize=11;align=center;" vertex="1" parent="1">
+          <mxGeometry x="95" y="598" width="320" height="36" as="geometry"/>
+        </mxCell>
+        <mxCell id="flowTitle" value="Every write operation — enforced by the server, not the client" style="text;html=1;fontSize=13;fontStyle=1;align=center;" vertex="1" parent="1">
+          <mxGeometry x="520" y="86" width="540" height="22" as="geometry"/>
+        </mxCell>
+        <mxCell id="s1" value="1 · Agent calls planChange&#10;(operation + exact parameters)" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#dae8fc;strokeColor=#6c8ebf;fontSize=11;align=center;" vertex="1" parent="1">
+          <mxGeometry x="540" y="130" width="240" height="60" as="geometry"/>
+        </mxCell>
+        <mxCell id="s2" value="Server validates &amp;amp; returns an&#10;HMAC-signed, single-use token&#10;(bound to the exact params · 10 min)" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#ffffff;strokeColor=#6c8ebf;fontSize=11;align=center;dashed=1;" vertex="1" parent="1">
+          <mxGeometry x="540" y="220" width="240" height="66" as="geometry"/>
+        </mxCell>
+        <mxCell id="s3" value="2 · Agent shows the plan to the USER&#10;and obtains explicit approval" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#dae8fc;strokeColor=#6c8ebf;fontSize=11;align=center;" vertex="1" parent="1">
+          <mxGeometry x="540" y="316" width="240" height="60" as="geometry"/>
+        </mxCell>
+        <mxCell id="s4" value="3 · Agent calls executeChange&#10;(same params + token)" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#dae8fc;strokeColor=#6c8ebf;fontSize=11;align=center;" vertex="1" parent="1">
+          <mxGeometry x="540" y="406" width="240" height="60" as="geometry"/>
+        </mxCell>
+        <mxCell id="s5" value="SERVER asks the USER directly&#10;(MCP elicitation) — the agent never&#10;sees or answers this prompt" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#fff2cc;strokeColor=#d6b656;fontSize=11;align=center;fontStyle=1;" vertex="1" parent="1">
+          <mxGeometry x="540" y="496" width="240" height="66" as="geometry"/>
+        </mxCell>
+        <mxCell id="s6" value="Change executes&#10;(or fails closed if the client&#10;can't elicit / token invalid)" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#d5e8d4;strokeColor=#82b366;fontSize=11;align=center;fontStyle=1;" vertex="1" parent="1">
+          <mxGeometry x="540" y="592" width="240" height="66" as="geometry"/>
+        </mxCell>
+        <mxCell id="e1" style="edgeStyle=orthogonalEdgeStyle;rounded=0;html=1;strokeColor=#6c8ebf;strokeWidth=2;" edge="1" parent="1" source="s1" target="s2"><mxGeometry relative="1" as="geometry"/></mxCell>
+        <mxCell id="e2" style="edgeStyle=orthogonalEdgeStyle;rounded=0;html=1;strokeColor=#6c8ebf;strokeWidth=2;" edge="1" parent="1" source="s2" target="s3"><mxGeometry relative="1" as="geometry"/></mxCell>
+        <mxCell id="e3" style="edgeStyle=orthogonalEdgeStyle;rounded=0;html=1;strokeColor=#6c8ebf;strokeWidth=2;" edge="1" parent="1" source="s3" target="s4"><mxGeometry relative="1" as="geometry"/></mxCell>
+        <mxCell id="e4" style="edgeStyle=orthogonalEdgeStyle;rounded=0;html=1;strokeColor=#6c8ebf;strokeWidth=2;" edge="1" parent="1" source="s4" target="s5"><mxGeometry relative="1" as="geometry"/></mxCell>
+        <mxCell id="e5" style="edgeStyle=orthogonalEdgeStyle;rounded=0;html=1;strokeColor=#82b366;strokeWidth=2;" edge="1" parent="1" source="s5" target="s6"><mxGeometry relative="1" as="geometry"/></mxCell>
+        <mxCell id="badge" value="delete &amp;amp; execPod&#10;NEVER exempt —&#10;even in auto-write mode" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#f8cecc;strokeColor=#b85450;fontSize=11;fontStyle=1;align=center;" vertex="1" parent="1">
+          <mxGeometry x="830" y="496" width="200" height="66" as="geometry"/>
+        </mxCell>
+        <mxCell id="e6" style="edgeStyle=orthogonalEdgeStyle;rounded=0;html=1;strokeColor=#b85450;strokeWidth=2;dashed=1;" edge="1" parent="1" source="s5" target="badge"><mxGeometry relative="1" as="geometry"/></mxCell>
+        <mxCell id="link" style="edgeStyle=orthogonalEdgeStyle;rounded=0;html=1;strokeColor=#999999;strokeWidth=2;dashed=1;startArrow=none;endArrow=block;" edge="1" parent="1" source="e" target="s1"><mxGeometry relative="1" as="geometry"/></mxCell>
+      </root>
+    </mxGraphModel>
+  </diagram>
+</mxfile>
