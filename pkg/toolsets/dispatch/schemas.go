@@ -49,6 +49,22 @@ func mustSchema(s *jsonschema.Schema, err error) *jsonschema.Schema {
 	return s
 }
 
+// permissivePatchItemsSchema returns the items schema for the patch parameter.
+// json.RawMessage infers items as integer(0-255); a JSON patch is an array of
+// objects, so the items schema is replaced with a permissive one — the
+// handler's patchList() validates the real shape.
+//
+// The schema must serialize to a plain JSON object, never a boolean: an empty
+// &jsonschema.Schema{} marshals as the boolean subschema `true`, which is
+// valid JSON Schema 2020-12 but rejected by strict OpenAPI-style validators
+// used by some OpenAI-compatible upstreams (Volcano Engine Ark error 11133,
+// codebuddyCN error 400001). {"type":["null","object"]} is semantically
+// equivalent (accepts any item, null included to match jsonschema-go's
+// nullable-inference convention) while staying object-shaped.
+func permissivePatchItemsSchema() *jsonschema.Schema {
+	return &jsonschema.Schema{Types: []string{"null", "object"}}
+}
+
 // QueryInputSchema builds the rancherQuery input schema.
 func QueryInputSchema() *jsonschema.Schema {
 	s := mustSchema(jsonschema.For[QueryParams](nil))
@@ -70,10 +86,7 @@ func PlanInputSchema() *jsonschema.Schema {
 	s.Properties["operation"].Enum = enumOf(ChangeOperations)
 	forcePlainType(s, "command", "array")
 	forcePlainType(s, "patch", "array")
-	// json.RawMessage infers items as integer(0-255); a JSON patch is an array
-	// of objects. Replace the items schema with a permissive one — the handler's
-	// patchList() validates the real shape.
-	s.Properties["patch"].Items = &jsonschema.Schema{}
+	s.Properties["patch"].Items = permissivePatchItemsSchema()
 	return s
 }
 
@@ -85,10 +98,7 @@ func ExecuteInputSchema(requireToken bool) *jsonschema.Schema {
 	s.Properties["operation"].Enum = enumOf(ChangeOperations)
 	forcePlainType(s, "command", "array")
 	forcePlainType(s, "patch", "array")
-	// json.RawMessage infers items as integer(0-255); a JSON patch is an array
-	// of objects. Replace the items schema with a permissive one — the handler's
-	// patchList() validates the real shape.
-	s.Properties["patch"].Items = &jsonschema.Schema{}
+	s.Properties["patch"].Items = permissivePatchItemsSchema()
 	if requireToken {
 		s.Required = append(s.Required, "confirmationToken")
 	}

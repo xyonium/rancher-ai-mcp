@@ -3,11 +3,13 @@ package dispatch
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"slices"
 	"strings"
 	"testing"
 
+	"github.com/google/jsonschema-go/jsonschema"
 	"github.com/modelcontextprotocol/go-sdk/mcp"
 )
 
@@ -122,5 +124,25 @@ func TestSchemas(t *testing.T) {
 	d := DiagnoseInputSchema()
 	if len(d.Properties["target"].Enum) != len(DiagnoseTargets) {
 		t.Fatal("diagnose schema target enum mismatch")
+	}
+}
+
+func TestPatchSchemaSerializesNoBooleanSubschema(t *testing.T) {
+	for name, s := range map[string]*jsonschema.Schema{
+		"plan":    PlanInputSchema(),
+		"execute": ExecuteInputSchema(false),
+	} {
+		raw, err := json.Marshal(s)
+		if err != nil {
+			t.Fatalf("%s: marshal: %v", name, err)
+		}
+		var m map[string]any
+		if err := json.Unmarshal(raw, &m); err != nil {
+			t.Fatalf("%s: unmarshal: %v", name, err)
+		}
+		items := m["properties"].(map[string]any)["patch"].(map[string]any)["items"]
+		if b, ok := items.(bool); ok {
+			t.Fatalf("%s: patch.items serialized as boolean %v — strict upstreams (Volcano Engine Ark 11133, codebuddyCN 400001) reject boolean subschemas", name, b)
+		}
 	}
 }
