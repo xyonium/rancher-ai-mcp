@@ -1,6 +1,6 @@
 # 落地文档：修复工具 schema 中的布尔子模式 `items: true`（火山方舟 11133 / codebuddyCN 400001）
 
-> 状态：待落地
+> 状态：已落地（fork `0f732a3`，tag `v1.2.0-alpha.4`）；上游联动见文末（rancher/rancher-ai-mcp issue #154 / PR #155）
 > 关联上游问题：CLIProxyAPI [issue #6230](https://github.com/router-for-me/CLIProxyAPI/issues/6230)（claude→openai 路径，已修）与 [issue #6324](https://github.com/router-for-me/CLIProxyAPI/issues/6324)（openai→openai 路径，维护者判定"应在工具生产者或上游修复"后关闭）
 > 影响面：本 fork 全部 7 个合并工具中，`planChange` / `executeChange` 两个工具的 `patch` 参数
 
@@ -140,6 +140,8 @@ func TestPatchSchemaSerializesNoBooleanSubschema(t *testing.T) {
 
 ---
 
-## 5. 上游联动（可选后续）
+## 5. 上游联动（已完成）
 
-修复落地后，可向上游 `rancher/rancher-ai-mcp` 提 issue/PR（一行 schema 修正 + 测试），引用 CLIProxyAPI #6230/#6324 作为真实世界影响证据。这符合 CLIProxyAPI 维护者在 #6324 中"permanent fix 应在工具生产者"的指引，也能让 fork 少维护一个差异点。
+已向上游 `rancher/rancher-ai-mcp` 提交 [issue #154](https://github.com/rancher/rancher-ai-mcp/issues/154) + [PR #155](https://github.com/rancher/rancher-ai-mcp/pull/155)（分支基于 upstream/main，目标 main —— 上游所有 PR 均以 main 为 base）。
+
+**注意**：上游的触发点与 fork 不同 —— 上游无 dispatch 包，其 `patchResourceInputSchema()` 中 `patch` 是类型化 `jsonPatchList`，items 是对象 schema，但 op 结构体的 `Value any` 字段序列化为 `"value": true`（同样被方舟类严格校验拒绝）。上游 PR 修的是该处（显式列出全部 JSON 类型替代 `true`）；fork 文档 §2.1 的 `items: true` 修复仅适用于本 fork 的 dispatch 层。
