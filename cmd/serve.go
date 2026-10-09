@@ -8,6 +8,7 @@ import (
 	"net/http"
 	"os"
 	"strconv"
+	"time"
 
 	"github.com/modelcontextprotocol/go-sdk/mcp"
 	"github.com/rancher/dynamiclistener"
@@ -36,6 +37,7 @@ var (
 	readOnly       bool
 	allowAutoWrite bool
 	enableExec     bool
+	keepAlive      time.Duration
 	authzServerURL string
 	jwksURL        string
 	resourceURL    string
@@ -56,6 +58,7 @@ func init() {
 	serveCmd.Flags().BoolVar(&readOnly, "read-only", false, "Only register read-only tools")
 	serveCmd.Flags().BoolVar(&allowAutoWrite, "allow-auto-write", false, "Allow create/update-class tools to execute without per-operation user confirmation (env MCP_ALLOW_AUTO_WRITE). Delete and exec always require confirmation. DANGEROUS: enable only for trusted automation")
 	serveCmd.Flags().BoolVar(&enableExec, "enable-exec", false, "Enable the execPod operation of planChange/executeChange (env MCP_ENABLE_EXEC). The tool surface does not change: without this flag the operation is refused at runtime. Disabled by default")
+	serveCmd.Flags().DurationVar(&keepAlive, "keep-alive", 0, "Send periodic pings on the SSE stream to keep it alive across idle periods (e.g. 30s). 0 disables. Recommended behind proxies/ingresses with idle connection timeouts; pick an interval comfortably below the proxy's idle timeout.")
 
 	serveCmd.Flags().StringVar(&authzServerURL, "authz-server-url", "", "Authorization Server URL - used to generate the OIDC urls")
 	serveCmd.Flags().StringVar(&jwksURL, "jwks-url", "", "JWKS URL - from the OAuth2 server")
@@ -73,6 +76,7 @@ func runServe(cmd *cobra.Command, args []string) error {
 
 	mcpServer := mcp.NewServer(&mcp.Implementation{Name: "rancher mcp server", Version: "v1.0.0"}, &mcp.ServerOptions{
 		Instructions: toolsets.SafetyInstructions(cfg),
+		KeepAlive:    keepAlive,
 	})
 	client, err := client.NewClient(insecure, authzServerURL)
 	if err != nil {

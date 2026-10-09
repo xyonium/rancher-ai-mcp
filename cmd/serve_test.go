@@ -3,6 +3,7 @@ package cmd
 import (
 	"strconv"
 	"testing"
+	"time"
 
 	"github.com/rancher/rancher-ai-mcp/pkg/confirm"
 	"github.com/rancher/rancher-ai-mcp/pkg/toolsets"
@@ -43,11 +44,27 @@ func TestRunServeCommand(t *testing.T) {
 }
 
 func TestServeFlagsRegistered(t *testing.T) {
-	for name, def := range map[string]string{"allow-auto-write": "false", "enable-exec": "false"} {
+	for name, def := range map[string]string{"allow-auto-write": "false", "enable-exec": "false", "keep-alive": "0s"} {
 		flag := serveCmd.Flags().Lookup(name)
 		require.NotNil(t, flag, "flag --%s must be registered", name)
 		assert.Equal(t, def, flag.DefValue)
 	}
+}
+
+// TestKeepAliveFlagPinsDefaultOff pins that SSE keepalive is opt-in: the
+// zero default leaves ServerOptions.KeepAlive unset (go-sdk keeps its
+// no-heartbeat behavior), so upstream-compatible deployments see no change
+// unless the operator explicitly opts in.
+func TestKeepAliveFlagPinsDefaultOff(t *testing.T) {
+	flag := serveCmd.Flags().Lookup("keep-alive")
+	require.NotNil(t, flag, "--keep-alive must be registered")
+	assert.Equal(t, "0s", flag.DefValue, "keep-alive must default to disabled")
+	assert.Equal(t, "duration", flag.Value.Type(), "keep-alive must be a duration flag")
+
+	// It must accept a duration value.
+	require.NoError(t, serveCmd.Flags().Set("keep-alive", "30s"))
+	t.Cleanup(func() { require.NoError(t, serveCmd.Flags().Set("keep-alive", "0s")) })
+	assert.Equal(t, 30*time.Second, keepAlive)
 }
 
 func TestBoolFlagOrEnv(t *testing.T) {
