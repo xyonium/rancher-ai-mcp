@@ -67,6 +67,46 @@ func TestKeepAliveFlagPinsDefaultOff(t *testing.T) {
 	assert.Equal(t, 30*time.Second, keepAlive)
 }
 
+// TestDurationFlagOrEnv pins the resolution order for --keep-alive /
+// MCP_KEEP_ALIVE: an explicit flag always wins; otherwise a parseable env
+// duration applies; otherwise the flag default. The Docker image ships
+// MCP_KEEP_ALIVE=30s, so a parseable env must take effect when no flag is set.
+func TestDurationFlagOrEnv(t *testing.T) {
+	const (
+		flagName = "keep-alive"
+		envName  = "MCP_KEEP_ALIVE"
+	)
+
+	tests := []struct {
+		name    string
+		setFlag bool
+		flagVal time.Duration
+		envVal  string
+		want    time.Duration
+	}{
+		{name: "no flag no env uses default", want: 0},
+		{name: "env 30s, flag not set", envVal: "30s", want: 30 * time.Second},
+		{name: "env 0 disables, flag not set", envVal: "0", want: 0},
+		{name: "invalid env ignored", envVal: "not-a-duration", want: 5 * time.Second, flagVal: 5 * time.Second},
+		{name: "explicit flag beats env", setFlag: true, flagVal: 10 * time.Second, envVal: "30s", want: 10 * time.Second},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Setenv(envName, tt.envVal)
+
+			cmd := &cobra.Command{Use: "test"}
+			var flagVal time.Duration
+			cmd.Flags().DurationVar(&flagVal, flagName, tt.flagVal, "test flag")
+			if tt.setFlag {
+				require.NoError(t, cmd.Flags().Set(flagName, tt.flagVal.String()))
+			}
+
+			assert.Equal(t, tt.want, durationFlagOrEnv(cmd, flagName, envName, flagVal))
+		})
+	}
+}
+
 func TestBoolFlagOrEnv(t *testing.T) {
 	const (
 		flagName = "allow-auto-write"

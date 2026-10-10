@@ -58,7 +58,7 @@ func init() {
 	serveCmd.Flags().BoolVar(&readOnly, "read-only", false, "Only register read-only tools")
 	serveCmd.Flags().BoolVar(&allowAutoWrite, "allow-auto-write", false, "Allow create/update-class tools to execute without per-operation user confirmation (env MCP_ALLOW_AUTO_WRITE). Delete and exec always require confirmation. DANGEROUS: enable only for trusted automation")
 	serveCmd.Flags().BoolVar(&enableExec, "enable-exec", false, "Enable the execPod operation of planChange/executeChange (env MCP_ENABLE_EXEC). The tool surface does not change: without this flag the operation is refused at runtime. Disabled by default")
-	serveCmd.Flags().DurationVar(&keepAlive, "keep-alive", 0, "Send periodic pings on the SSE stream to keep it alive across idle periods (e.g. 30s). 0 disables. Recommended behind proxies/ingresses with idle connection timeouts; pick an interval comfortably below the proxy's idle timeout.")
+	serveCmd.Flags().DurationVar(&keepAlive, "keep-alive", 0, "Send periodic pings on the SSE stream to keep it alive across idle periods (e.g. 30s). 0 disables. Recommended behind proxies/ingresses with idle connection timeouts; pick an interval comfortably below the proxy's idle timeout (env MCP_KEEP_ALIVE).")
 
 	serveCmd.Flags().StringVar(&authzServerURL, "authz-server-url", "", "Authorization Server URL - used to generate the OIDC urls")
 	serveCmd.Flags().StringVar(&jwksURL, "jwks-url", "", "JWKS URL - from the OAuth2 server")
@@ -68,6 +68,7 @@ func init() {
 func runServe(cmd *cobra.Command, args []string) error {
 	allowAutoWrite = boolFlagOrEnv(cmd, "allow-auto-write", "MCP_ALLOW_AUTO_WRITE", allowAutoWrite)
 	enableExec = boolFlagOrEnv(cmd, "enable-exec", "MCP_ENABLE_EXEC", enableExec)
+	keepAlive = durationFlagOrEnv(cmd, "keep-alive", "MCP_KEEP_ALIVE", keepAlive)
 
 	cfg, err := serveConfig(readOnly, allowAutoWrite, enableExec)
 	if err != nil {
@@ -144,6 +145,21 @@ func boolFlagOrEnv(cmd *cobra.Command, flagName, envName string, flagVal bool) b
 	if v := os.Getenv(envName); v != "" {
 		if b, err := strconv.ParseBool(v); err == nil {
 			return b
+		}
+	}
+	return flagVal
+}
+
+// durationFlagOrEnv resolves a duration startup option. An explicitly set flag
+// always wins; otherwise the environment variable is used when it parses as a
+// Go duration (e.g. "30s"); otherwise the flag's default applies.
+func durationFlagOrEnv(cmd *cobra.Command, flagName, envName string, flagVal time.Duration) time.Duration {
+	if cmd.Flags().Changed(flagName) {
+		return flagVal
+	}
+	if v := os.Getenv(envName); v != "" {
+		if d, err := time.ParseDuration(v); err == nil {
+			return d
 		}
 	}
 	return flagVal

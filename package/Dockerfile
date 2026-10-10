@@ -46,7 +46,11 @@ USER ${UID}:${GID}
 # every cached layer except this final metadata-only ENV layer.
 ARG MCP_ALLOW_AUTO_WRITE=false
 ARG MCP_ENABLE_EXEC=false
+# SSE keepalive: on by default (30s) so the stream survives proxy/ingress idle
+# timeouts; set MCP_KEEP_ALIVE=0 (or --keep-alive=0) to disable.
+ARG MCP_KEEP_ALIVE=30s
 ENV MCP_ALLOW_AUTO_WRITE=${MCP_ALLOW_AUTO_WRITE} \
-    MCP_ENABLE_EXEC=${MCP_ENABLE_EXEC}
+    MCP_ENABLE_EXEC=${MCP_ENABLE_EXEC} \
+    MCP_KEEP_ALIVE=${MCP_KEEP_ALIVE}
 
 CMD ["/usr/local/bin/mcp"]
