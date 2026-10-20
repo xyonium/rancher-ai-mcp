@@ -1,76 +1,95 @@
-# Selective keepalive: gate server pings on pending elicitations
+# Elicitation-scoped keepalive: ping the client only while a dialog is open
 
-**Date:** 2026-10-20
-**Status:** approved design (in-chat), implementing
+**Date:** 2026-10-20 (revised 2026-10-20, alpha.8)
+**Status:** alpha.8 implementation
 **Owner:** fork
 
-## Problem (corrected root cause)
+## Problem (final root cause, two faults stacked)
 
-The running pod `rancher-mcp-server-74584765d4-psc2p` has **`restartCount: 0` since 2026-10-10
-02:06 UTC** — no overnight restart, no cert-rotation kill. The previous "pod restarts wipe
-sessions" hypothesis is disproved.
+Pod forensics disproved the original "nightly cert-rotation restart wipes sessions"
+hypothesis: `restartCount: 0` over 10 days on alpha.5. Two server-side defects were actually
+responsible for the chronic **404 session-not-found**, and the alpha.6/alpha.7 attempts to fix
+them introduced a third:
 
-The actual killer is the fork's own `MCP_KEEP_ALIVE=30s` default (image `v1.2.0-alpha.6`).
-go-sdk v1.7.0 `startKeepalive` (`mcp/shared.go:852-890`) sends a server→client `ping` every
-interval, gives the client `interval/2` (15 s) to answer, tolerates **one** failure, then calls
-`session.Close()`. Ping delivery (`mcp/streamable.go` `Write`) lands on the **standalone SSE
-stream**. Clients that only ever POST (dsh, baseline, most MCP HTTP clients) never open that
-stream, so the ping cannot be delivered → times out → the server kills a live session and
-removes it from the in-memory map → the client's next POST with the old `Mcp-Session-Id`
-receives **404 session not found**. For non-ponging clients, alpha.6 turned every session into
-a ~45-second death sentence.
+1. **alpha.6 (SDK built-in keepalive):** `MCP_KEEP_ALIVE=30s` mapped straight onto
+   `ServerOptions.KeepAlive`. go-sdk v1.7.0 `startKeepalive` pings **every** session
+   unconditionally, waits `interval/2` for a pong, tolerates **one** failure, then calls
+   `session.Close()`. Ping delivery prefers an in-flight request's response stream, but a
+   session with nothing in flight falls back to the **standalone GET SSE stream** — which
+   POST-only clients (dsh, most HTTP MCP clients) never open. Those pings could never be
+   delivered, so every non-ponging session was killed ~45 s after creation. → chronic 404s
+   for every long-lived agent.
+2. **alpha.7 (alpha.7-band-aid, "swallow the ping" middleware):** to keep the benefit for
+   elicitation dialogs without the kill, a sending middleware intercepted the SDK's keepalive
+   ping and returned a locally-fabricated success result when no dialog was open. **This
+   panics:** SDK `handleSend[R]` type-asserts the result with `res.(R)` where `R` is the
+   method's **concrete, unexported** type (`*emptyResult` for ping). No value the middleware
+   can construct satisfies an unexported type assertion, so the first swallowed ping crashed
+   the whole server process (exit 2) → all sessions wiped → clients re-init → ~30 s later
+   crash again. This was the alpha.7 crash-loop (`restartCount` 3 within 8 minutes) reported
+   as "dsh 一直 404".
 
-Why the flag exists at all: it was added to keep Claude Code's SSE stream alive across the
-ingress's idle timeout **while an elicitation dialog is hanging open** (the only moment the
-server→client stream must survive long silences). So keepalive is genuinely needed — but only
-in that window.
+## Design (alpha.8)
 
-## Design
+**Stop intercepting the SDK's ping entirely. The server owns the pinging loop directly, but
+only in the window where a response stream actually needs warming.**
 
-Gate the ping on whether the session has a **pending elicitation**.
-
-- `cmd/serve.go` keeps `mcp.NewServer(..., &mcp.ServerOptions{KeepAlive: keepAlive})` so the
-  SDK spawns its per-session keepalive goroutine as usual.
-- A small package (`pkg/keepalivegate`) exposes a per-session atomic counter and an
-  `mcp.Middleware` (sending) that:
-  1. passes `ping` through **only when that session's counter > 0**; otherwise swallows it
-     (returns a zero-value `PingResult`, never touching the socket — no traffic, no failure
-     counter, no session kill);
-  2. increments the counter when it sees `elicitation/create` go out, and decrements it when
-     that call returns (wraps `next` in a `defer` — result *or* error, both decrement).
-- Sessions are keyed by their `ServerSession` pointer (safe: the counter is per-session by
-  construction because middleware receives the session-bound `Request`).
-- No vendoring, no SDK patch. Uses only public API: `Server.AddSendingMiddleware`,
-  `Middleware`, `MethodHandler`, `ServerRequest`.
+- `cmd/serve.go` leaves `ServerOptions.KeepAlive` at its zero default — the SDK spawns no
+  per-session keepalive goroutine, so there is nothing to swallow and nothing to panic.
+  `--keep-alive`/`MCP_KEEP_ALIVE` stay registered (old envs from alpha.6/alpha.7 images
+  parse) but are **ignored**, with a help text explaining why.
+- `pkg/keepalivegate` installs a **sending** `mcp.Middleware` that watches for outbound
+  server's `elicitation/create` calls (which is exactly how `confirm.Gate` shows the
+  confirmation dialog). For each session:
+  - first open dialog → arm a watchdog goroutine that calls the SDK's **exported**
+    `(*ServerSession).Ping` every 30 s. The SDK writes a genuine ping onto the hanging tool
+    call's POST-response SSE stream — the one stream that exists at that moment and the one
+    the ingress would otherwise idle-kill after 360 s.
+  - last dialog closes → watchdog exits; the session goes back to **complete server→client
+    silence**, which is the strongest possible guarantee that clients who cannot pong are
+    never disconnected for missing one. No synthetic results are ever fabricated; the gate
+    never fabricates an `mcp.Result`.
+  - successive dialogs on one session are throttled (`minSpacing = 2 s`) so rapid
+    open/close/open (token re-validation, multi-step confirms) can never run two watchdogs
+    over the same session.
+- Liveness on a dead client: `Ping` error ⇒ watchdog exits silently. The watchdog **never**
+  closes the session — session teardown belongs to the transport, not to the gate.
 
 ### Behavior matrix
 
-| Client / phase | counter | ping | outcome |
-|---|---|---|---|
-| plain POST client (dsh), normal calls | 0 | swallowed | session never killed; 404 gone |
-| Claude Code, no dialog open | 0 | swallowed | same safety as upstream stock |
-| Claude Code, `executeChange` dialog open | ≥1 | sent every 30 s | SSE stream stays warm through ingress idle timeout (original fix preserved) |
-| dialog answered / cancelled / errored | back to 0 | swallowed | stream goes quiet again |
+| Client / phase | pings on the wire | outcome |
+|---|---|---|
+| plain POST client (dsh), normal work | none | session lives indefinitely; 404s gone |
+| any client, confirmation dialog open | one real ping every 30 s on the tool call's response stream | stream survives ingress idle timeout (original #157 benefit kept), dialog still pops |
+| dialog answered / cancelled / errored | stops at last close | silence resumes |
+| client vanishes mid-dialog | watchdog's `Ping` errors → watchdog exits | session is left to the transport's own teardown; no zombie kill |
 
-### Accepted boundaries (non-issues)
+### Why this fixes alpha.7's panic class permanently
 
-1. If the client dies while a dialog is open, the counter stays > 0 until the tool handler's
-   context ends; worst case the server fires a few wasted pings at a dead client for one
-   interval. No correctness impact, no cross-session impact.
-2. The SDK's keepalive goroutine keeps running per session either way — it just becomes a
-   no-op when the gate swallows its pings. Goroutine cost per session is negligible.
+The alpha.7 test suite passed because every test exercise stopped **before** the real
+`handleSend` concrete assertion. The new test (`pkg/keepalivegate/keepalivegate_test.go`)
+spins a real in-memory server+client through the full SDK with the gate installed, counts
+pings that actually hit the wire, and asserts both invariants: **pings while the dialog is
+open, silence after it closes** — exercising every line of the production send path the
+alpha.7 panics lived in. A panic anywhere in that path fails the test loudly instead of
+shipping.
 
 ## What this does NOT change
 
-- `confirm.Gate` (token issue/consume/TTL/nonce) untouched — this is transport-layer only.
-- `MCP_KEEP_ALIVE` env / `--keep-alive` flag semantics stay; operators can still disable
-  entirely with `0`.
+- `confirm.Gate` (token issue/consume/TTL/nonce) untouched — transport-layer change only.
+- The ingress `rancher-mcp-ingress` keeps its 360 s idle timeout; we just never rely on
+  surviving it except while a dialog is open.
 - No image rebuild or rollout is triggered by the code change itself.
 
 ## Follow-ups (not in scope)
 
-- `confirm.Gate` HMAC key is generated per process start and `TokenTTL` is 10 min; any pod
-  restart invalidates outstanding confirmation tokens ("bad signature"). Separate, independent
+- `confirm.Gate` HMAC key is per-process and `TokenTTL` is 10 min; any pod restart
+  invalidates outstanding confirmation tokens ("bad signature"). Pre-existing, independent
   fork robustness item.
-- Clients (dsh) still worth fixing their own 404→re-init; that protects them against any other
-  server-side session loss. But the server must stop killing live sessions first.
+- Upstream: worth an issue against `github.com/modelcontextprotocol/go-sdk` that
+  `startKeepalive`'s one-missed-pong `session.Close()` is unsafe for POST-only clients —
+  pings undeliverable on the standalone SSE stream must not be lethal. (Today we route around
+  the SDK keepalive entirely.)
+- Clients without 404→re-init (dsh, older Claude Code / TS SDK stacks) still benefit from
+  fixing re-init client-side as defence-in-depth against any *other* session loss, but the
+  server must stop killing live sessions first.

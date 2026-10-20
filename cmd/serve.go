@@ -38,6 +38,8 @@ var (
 	readOnly       bool
 	allowAutoWrite bool
 	enableExec     bool
+	// keepAlive stays declared so --keep-alive / MCP_KEEP_ALIVE from older
+	// deployments keep parsing (and are ignored); see init and runServe.
 	keepAlive      time.Duration
 	authzServerURL string
 	jwksURL        string
@@ -59,7 +61,7 @@ func init() {
 	serveCmd.Flags().BoolVar(&readOnly, "read-only", false, "Only register read-only tools")
 	serveCmd.Flags().BoolVar(&allowAutoWrite, "allow-auto-write", false, "Allow create/update-class tools to execute without per-operation user confirmation (env MCP_ALLOW_AUTO_WRITE). Delete and exec always require confirmation. DANGEROUS: enable only for trusted automation")
 	serveCmd.Flags().BoolVar(&enableExec, "enable-exec", false, "Enable the execPod operation of planChange/executeChange (env MCP_ENABLE_EXEC). The tool surface does not change: without this flag the operation is refused at runtime. Disabled by default")
-	serveCmd.Flags().DurationVar(&keepAlive, "keep-alive", 0, "Interval for server keepalive pings (env MCP_KEEP_ALIVE). Pings are only emitted while a confirmation elicitation is open for that session, where they hold the response's SSE stream through proxy/ingress idle timeouts; at all other times the gate swallows them so clients that never open the standalone SSE stream (and cannot pong) are not disconnected. Pick an interval comfortably below the proxy's idle timeout (e.g. 30s). 0 disables.")
+	serveCmd.Flags().DurationVar(&keepAlive, "keep-alive", 0, "Deprecated/no-op, kept for compatibility and to hard-neutralize stale MCP_KEEP_ALIVE envs from older image variants. Keepalive is no longer the SDK's ServerOptions.KeepAlive (unconditional per-session pings that kill any client that cannot pong). Instead, the elicitation gate always emits real server->client pings every 30s — only while a confirmation dialog is open — to hold that response's SSE stream through proxy/ingress idle timeouts; at all other times sessions are completely silent, so POST-only clients are never disconnected.")
 
 	serveCmd.Flags().StringVar(&authzServerURL, "authz-server-url", "", "Authorization Server URL - used to generate the OIDC urls")
 	serveCmd.Flags().StringVar(&jwksURL, "jwks-url", "", "JWKS URL - from the OAuth2 server")
@@ -69,7 +71,9 @@ func init() {
 func runServe(cmd *cobra.Command, args []string) error {
 	allowAutoWrite = boolFlagOrEnv(cmd, "allow-auto-write", "MCP_ALLOW_AUTO_WRITE", allowAutoWrite)
 	enableExec = boolFlagOrEnv(cmd, "enable-exec", "MCP_ENABLE_EXEC", enableExec)
-	keepAlive = durationFlagOrEnv(cmd, "keep-alive", "MCP_KEEP_ALIVE", keepAlive)
+	// keepAlive is intentionally ignored: the SDK's ServerOptions.KeepAlive
+	// stays off (see NewServer below); keeping it on the left would silently
+	// re-enable the behavior that killed POST-only client sessions.
 
 	cfg, err := serveConfig(readOnly, allowAutoWrite, enableExec)
 	if err != nil {
@@ -78,14 +82,19 @@ func runServe(cmd *cobra.Command, args []string) error {
 
 	mcpServer := mcp.NewServer(&mcp.Implementation{Name: "rancher mcp server", Version: "v1.0.0"}, &mcp.ServerOptions{
 		Instructions: toolsets.SafetyInstructions(cfg),
-		KeepAlive:    keepAlive,
+		// SDK keepalive stays OFF. Its per-session pings are unconditional
+		// and it closes the session after one missed pong — fatal for
+		// POST-only clients. The elicitation gate below owns pinging instead,
+		// and only while a dialog is open. The --keep-alive env/flag is
+		// deliberately not wired here (see flag help).
 	})
-	// Gate server->client keepalive pings on pending elicitations: pings only
-	// go on the wire while a confirmation dialog is open (holding that POST's
-	// SSE stream through proxy idle timeouts). Every other session's pings are
-	// swallowed, so clients that never open the standalone SSE stream — and
-	// therefore cannot pong — no longer have their sessions destroyed by the
-	// SDK's one-missed-pong session.Close().
+	// Install the elicitation-gated keepalive: while a confirmation dialog is
+	// open for a session, the gate pings the client every 30s on the real
+	// session, holding that POST's SSE response stream through proxy/ingress
+	// idle timeouts (the fork's original --keep-alive motivation, PR #157).
+	// When no dialog is open, no pings leave the server at all — so clients
+	// that never open the standalone SSE stream (and cannot pong) can never
+	// be disconnected for a missed pong.
 	mcpServer.AddSendingMiddleware(keepalivegate.Middleware())
 	client, err := client.NewClient(insecure, authzServerURL)
 	if err != nil {
@@ -172,6 +181,14 @@ func durationFlagOrEnv(cmd *cobra.Command, flagName, envName string, flagVal tim
 	}
 	return flagVal
 }
+
+// Silence the unused warnings until a future duration flag appears: keepAlive
+// is declared (to keep --keep-alive/MCP_KEEP_ALIVE parseable) but must never
+// feed ServerOptions.KeepAlive, and this helper is its only caller.
+var (
+	_ = keepAlive
+	_ = durationFlagOrEnv
+)
 
 func startInsecureServer(handler http.Handler) error {
 	zap.L().Info("MCP Server started!", zap.Int("port", port), zap.Bool("insecure", true))
